@@ -1,5 +1,6 @@
 package com.autopecas.autopecas.entity;
 import com.autopecas.autopecas.enums.TipoCliente;
+import com.autopecas.autopecas.valueobject.Endereco;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -9,31 +10,40 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Entidade abstrata base para clientes
+ *   - Tabela "clientes" guarda campos comuns.
+ *   - Tabelas "clientes_pf" e "clientes_pj" guardam campos específicos.
+ *
+ * Subclasses:
+ *   - ClientePF cpf, dataNascimento, rg
+ *   - ClientePJ  cnpj, razaoSocial
+ *
+ * Regras comuns:
+ *   - email é único
+ *   - Cliente nunca é deletado; usar ativo = false
+ *   - Documento (cpf/cnpj) é validado na camada de aplicação.
+ */
+
 @Entity
 @Table(
         name = "clientes",
-        uniqueConstraints = @UniqueConstraint(name = "uc_cliente_cpf_cnpj", columnNames = "cpf_cnpj")
+        uniqueConstraints = @UniqueConstraint(name = "uk_cliente_email", columnNames = "email")
 )
+@Inheritance(strategy = InheritanceType.JOINED)
+@DiscriminatorColumn(name = "tipo_cliente", discriminatorType = DiscriminatorType.STRING, length = 2)
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 @ToString(exclude = {"veiculos", "ordensServico"})
 @EqualsAndHashCode(of = "id")
-public class Cliente {
+public abstract class Cliente  {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
-
-    @Column(name = "cpf_cnpj", nullable = false)
-    private String cpfCnpj;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "tipo_cliente", nullable = false)
-    private TipoCliente tipoCliente;
 
     @Column(name = "nome", nullable = false)
     private String nome;
@@ -44,9 +54,23 @@ public class Cliente {
     @Column(name = "telefone")
     private String telefone;
 
-    @Column(name = "ativo")
-    @Builder.Default
+    @Column(name = "aceita_notificacoes", nullable = false)
+    private Boolean aceitaNotificacoes = true;
+
+    @Column(name = "ativo", nullable = false)
     private Boolean ativo = true;
+
+    @Embedded
+    @AttributeOverrides({
+            @AttributeOverride(name = "cep", column = @Column(name = "endereco_cep")),
+            @AttributeOverride(name = "logradouro", column = @Column(name = "endereco_logradouro")),
+            @AttributeOverride(name = "numero", column = @Column(name = "endereco_numero")),
+            @AttributeOverride(name = "complemento", column = @Column(name = "endereco_complemento")),
+            @AttributeOverride(name = "bairro", column = @Column(name = "endereco_bairro")),
+            @AttributeOverride(name = "cidade", column = @Column(name = "endereco_cidade")),
+            @AttributeOverride(name = "uf", column = @Column(name = "endereco_uf"))
+    })
+    private Endereco endereco;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -56,13 +80,19 @@ public class Cliente {
     @Column(name = "update_at", nullable = false)
     private LocalDateTime updatedAt;
 
-
-
-    @OneToMany(mappedBy = "cliente", cascade = CascadeType.ALL, orphanRemoval = false, fetch = FetchType.LAZY)
-    @Builder.Default
+    @OneToMany(mappedBy = "cliente", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<Veiculo> veiculos = new ArrayList<>();
 
-    @OneToMany(mappedBy = "cliente", cascade = CascadeType.ALL, orphanRemoval = false, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "cliente", fetch = FetchType.LAZY)
     private List<OrdemServico> ordensServico = new ArrayList<>();
+
+    //metodos
+    /* dessa forma podemos separar os atributos, cpf e cnpj em coisas distintas, caso seja pf pega o CPF
+    caso seja pj pega o CNPJ.
+     */
+    public abstract String getDocumento();
+
+    //retorna PF ou PJ a depender do tipo do cliente
+    public abstract TipoCliente getTipo();
 
 }

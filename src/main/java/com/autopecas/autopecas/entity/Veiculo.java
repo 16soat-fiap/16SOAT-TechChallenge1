@@ -1,19 +1,35 @@
 package com.autopecas.autopecas.entity;
 
+import com.autopecas.autopecas.enums.TipoCambio;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Veículo de um cliente.
+ *
+ * Regras:
+ *   - placa normalizada em maiúsculas sem hífen (Mercosul ou antigo).
+ *   - chassi (VIN) tem 17 caracteres alfanuméricos — único.
+ *   - renavam tem até 11 dígitos — único.
+ *   - quilometragemAtual é atualizada a cada nova OS (snapshot da última entrada).
+ *   - Um veículo pertence a UM cliente, mas pode ser transferido (alterar FK).
+ */
 @Entity
 @Table(
         name = "veiculos",
-        uniqueConstraints = @UniqueConstraint(name = "uc_veiculo_placa", columnNames = "placa")
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_veiculo_placa",   columnNames = "placa"),
+                @UniqueConstraint(name = "uk_veiculo_chassi",  columnNames = "chassi"),
+                @UniqueConstraint(name = "uk_veiculo_renavam", columnNames = "renavam")
+        }
 )
 @Getter
 @Setter
@@ -29,33 +45,67 @@ public class Veiculo {
     @Column(name = "id", updatable = false, nullable = false)
     private UUID id;
 
-    @Column(name = "placa", nullable = false)
+    /** Placa normalizada (sem hífen, maiúsculas). Aceita formato antigo (ABC1234) ou Mercosul (ABC1D23). */
+    @Column(name = "placa", nullable = false, length = 7)
     private String placa;
 
-    @Column(name = "marca", nullable = false)
+    /** Número do chassi (VIN). 17 caracteres alfanuméricos sem I, O, Q. */
+    @Column(name = "chassi", length = 17)
+    private String chassi;
+
+    /** RENAVAM — até 11 dígitos. NÃO SEI SE É NECESSARIO */
+    @Column(name = "renavam")
+    private String renavam;
+
+    @Column(name = "marca", nullable = false, length = 60)
     private String marca;
 
-    @Column(name = "modelo", nullable = false)
+    @Column(name = "modelo", nullable = false, length = 100)
     private String modelo;
 
-    @Column(name = "ano")
-    private Integer ano;
+    /** Ano modelo (pode diferir do ano de fabricação). */
+    @Column(name = "ano_modelo")
+    private Integer anoModelo;
+
+    @Column(name = "cor")
+    private String cor;
+
+    /** Cilindrada / versão do motor. Ex.: "1.0", "2.0 Turbo", "3.5 V6". */
+    @Column(name = "motor")
+    private String motor;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "tipo_cambio")
+    private TipoCambio tipoCambio;
+
+    /** Quilometragem registrada na última entrada na oficina */
+    @Column(name = "quilometragem_atual")
+    private Integer quilometragemAtual;
+
+    /** Data prevista da próxima revisão (informativo para lembretes ao cliente). */
+    @Column(name = "data_proxima_revisao")
+    private LocalDate dataProximaRevisao;
+
+    /** Observações do veículo */
+    @Column(name = "observacoes", length = 1000)
+    private String observacoes;
 
     @CreationTimestamp
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-
+    // ─── Relacionamentos
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "cliente_id", nullable = false, foreignKey = @ForeignKey(name = "veiculo_cliente"))
+    @JoinColumn(name = "cliente_id", nullable = false, foreignKey = @ForeignKey(name = "fk_veiculo_cliente"))
     private Cliente cliente;
 
-    @OneToMany(mappedBy = "veiculo", cascade = CascadeType.ALL, orphanRemoval = false, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "veiculo", fetch = FetchType.LAZY)
+    @Builder.Default
     private List<OrdemServico> ordensServico = new ArrayList<>();
-
 }
+

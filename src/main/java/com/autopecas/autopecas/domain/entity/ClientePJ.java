@@ -31,8 +31,8 @@ public class ClientePJ extends Cliente {
     @Column(name = "razao_social", nullable = false)
     private String razaoSocial;
 
-    @Column(name = "nome_fantasia")
-    private String nomeFantasia;
+    @Column(name = "telefone")
+    private String telefone;
 
     // Mantive como string, pois pode ser ISENTO
     @Column(name = "inscricao_estadual")

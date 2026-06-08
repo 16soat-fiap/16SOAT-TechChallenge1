@@ -6,6 +6,7 @@ public record ClienteCreatePJDTO(
         @NotBlank(message = "Nome é obrigatório")
         String nome,
         String email,
+        String telefone,
         boolean aceitaNotificacoes,
         @NotBlank(message = "CNPJ é obrigatório")
         String cnpj,

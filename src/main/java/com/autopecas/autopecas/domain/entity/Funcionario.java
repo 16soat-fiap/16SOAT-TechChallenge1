@@ -5,6 +5,7 @@ import com.autopecas.autopecas.domain.valueobject.Endereco;
 import jakarta.persistence.Entity;
 import jakarta.persistence.*;
 import lombok.*;
+import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDate;
@@ -38,7 +39,8 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@ToString(exclude = "usuario")
+@SuperBuilder
+@ToString
 @EqualsAndHashCode(of = "id")
 public abstract class Funcionario {
 

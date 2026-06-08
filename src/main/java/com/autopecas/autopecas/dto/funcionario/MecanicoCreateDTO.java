@@ -12,6 +12,7 @@ public record MecanicoCreateDTO(
         String cpf,
         String email,
         String telefone,
-        LocalDate dataNascimento
+        LocalDate dataNascimento,
+
 ) {
 }

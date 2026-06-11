@@ -188,7 +188,7 @@ public class OrdemServico {
     /** Retorna o orçamento aprovado */
     public Optional<Orcamento> getOrcamentoAprovado() {
         return orcamentos.stream()
-                .filter(o -> o.getStatus() == StatusOrcamento.APROVADO)
+                .filter(o -> o.getStatus() == StatusOrcamento.APROVADA)
                 .findFirst();
     }
 

@@ -22,12 +22,12 @@ import java.util.UUID;
  * - Se cliente rejeitar, criamos um orçamento (versao = versao + 1)
  * em vez de editar — preserva histórico de negociação.
  * Ciclo de vida (StatusOrcamento):
- * RASCUNHO → ENVIADO → APROVADO | REJEITADO | EXPIRADO | CANCELADO
+ * RASCUNHO → ENVIADA → APROVADA | CANCELADA | EXPIRADO | CANCELADO
  * Regras:
- * - Apenas UM orçamento por OS pode estar APROVADO.
+ * - Apenas UM orçamento por OS pode estar APROVADA.
  * - Aprovar um orçamento dispara o avanço OS para EM_EXECUCAO.
  * - Rejeitar permite criar versão (com motivo).
- * - data Validade ultrapassada com status ENVIADO marca como EXPIRADO.
+ * - data Validade ultrapassada com status ENVIADA marca como EXPIRADO.
  */
 
 @Entity
@@ -179,25 +179,25 @@ public class Orcamento {
         if (this.status != StatusOrcamento.RASCUNHO){
             throw new IllegalStateException("Apenas orçamentos em Rascunho podem ser enviados. Atual: " + status);
         }
-        this.status = StatusOrcamento.ENVIADO;
+        this.status = StatusOrcamento.ENVIADA;
         this.dataEnvio = LocalDateTime.now();
     }
 
     // aprovação do cliente
     public void aprovar(){
-        if (this.status != StatusOrcamento.ENVIADO){
+        if (this.status != StatusOrcamento.ENVIADA){
             throw new IllegalStateException("Apenas orçamentos enviados podem ser aprovados. Atual" + status);
         }
-        this.status = StatusOrcamento.APROVADO;
+        this.status = StatusOrcamento.APROVADA;
         this.dataRespostaCliente = LocalDateTime.now();
     }
 
     //rejeição do cliente
     public void rejeitar(String motivo){
-        if (this.status != StatusOrcamento.ENVIADO){
+        if (this.status != StatusOrcamento.ENVIADA){
             throw new IllegalStateException("Apenas orçamentos enviados podem ser rejeitados. Atual:" + status);
         }
-        this.status = StatusOrcamento.REJEITADO;
+        this.status = StatusOrcamento.CANCELADA;
         this.dataRespostaCliente = LocalDateTime.now();
         this.motivoRejeicao = motivo;
     }
@@ -211,12 +211,12 @@ public class Orcamento {
      * podemos usar para o retorno do cliente
     */
     public boolean estaValido(){
-        return status == StatusOrcamento.ENVIADO && !estaExpirado();
+        return status == StatusOrcamento.ENVIADA && !estaExpirado();
     }
 
     //Marca o orçamento como expirado
     public void expirar(){
-        if(this.status != StatusOrcamento.ENVIADO) return;
+        if(this.status != StatusOrcamento.ENVIADA) return;
         if(!estaExpirado()) return;
         this.status = StatusOrcamento.EXPIRADO;
     }

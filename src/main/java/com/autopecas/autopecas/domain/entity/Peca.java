@@ -59,9 +59,6 @@ public class Peca {
     @Column(name = "categoria", nullable = false)
     private CategoriaPeca categoria;
 
-    @Column(name = "preco_custo", nullable = false, precision = 10, scale = 2)
-    private BigDecimal precoCusto;
-
     @Column(name = "preco_venda", nullable = false, precision = 10, scale = 2)
     private BigDecimal precoVenda;
 

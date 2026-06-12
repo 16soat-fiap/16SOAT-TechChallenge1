@@ -7,7 +7,6 @@ public record DashboardDTO(
         long totalOsEmExecucao,
         long totalOsFinalizadas,
         long totalOsEntregues,
-        BigDecimal receitaMes,
         long estoqueBaixoCount
 ) {
 }

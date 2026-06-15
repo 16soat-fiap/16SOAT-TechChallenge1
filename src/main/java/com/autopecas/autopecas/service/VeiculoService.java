@@ -106,4 +106,13 @@ public class VeiculoService {
         log.info("Veículo atualizado. ID: {}", atualizado.getId());
         return veiculoMapper.toResponse(atualizado);
     }
+
+    @Transactional
+    public void deletar(UUID id) {
+        if (!veiculoRepository.existsById(id)) {
+            throw new ResourceNotFoundException("Veículo não encontrado, id: " + id);
+        }
+        veiculoRepository.deleteById(id);
+        log.info("Veículo deletado. ID: {}", id);
+    }
 }

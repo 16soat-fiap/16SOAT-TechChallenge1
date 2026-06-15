@@ -9,5 +9,5 @@ import org.mapstruct.Mapping;
 public interface ClienteMapper {
     @Mapping(target = "tipo", expression = "java(cliente.getTipo().name())")
     @Mapping(source = "documento", target = "documento")
-    ClienteResponseDTO toResponse(Cliente cliente);
+    ClienteResponseDTO  toResponse(Cliente cliente);
 }

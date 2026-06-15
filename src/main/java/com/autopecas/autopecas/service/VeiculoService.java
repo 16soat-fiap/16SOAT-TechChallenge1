@@ -27,7 +27,7 @@ public class VeiculoService {
 
     @Transactional(readOnly = true)
     public List<VeiculoResponseDTO> listar(){
-        return veiculoRepository.findAll()
+        return veiculoRepository.findAllByAtivoTrue()
                 .stream()
                 .map(veiculoMapper::toResponse)
                 .toList();
@@ -35,14 +35,14 @@ public class VeiculoService {
 
     @Transactional(readOnly = true)
     public VeiculoResponseDTO buscarPorId(UUID id){
-        Veiculo veiculo = veiculoRepository.findById(id)
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Veiculo não encontrado, id " + id));
         return veiculoMapper.toResponse(veiculo);
     }
 
     @Transactional(readOnly = true)
     public VeiculoResponseDTO buscarPorPlaca(String placa){
-        Veiculo veiculo = veiculoRepository.findByPlaca(placa.toUpperCase())
+        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(placa.toUpperCase())
                 .orElseThrow(() -> new ResourceNotFoundException("Placa " + placa + " Não encontrada"));
         return veiculoMapper.toResponse(veiculo);
     }
@@ -52,7 +52,7 @@ public class VeiculoService {
         if(!clienteRepository.existsById(clienteId)){
             throw new ResourceNotFoundException("Cliente não encontrado, id: " + clienteId);
         }
-        return veiculoRepository.findByClienteId(clienteId)
+        return veiculoRepository.findByClienteIdAndAtivoTrue(clienteId)
                 .stream()
                 .map(veiculoMapper::toResponse)
                 .toList();
@@ -109,10 +109,10 @@ public class VeiculoService {
 
     @Transactional
     public void deletar(UUID id) {
-        if (!veiculoRepository.existsById(id)) {
-            throw new ResourceNotFoundException("Veículo não encontrado, id: " + id);
-        }
-        veiculoRepository.deleteById(id);
-        log.info("Veículo deletado. ID: {}", id);
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Veículo não encontrado, id: " + id));
+        veiculo.setAtivo(false);
+        veiculoRepository.save(veiculo);
+        log.info("Veículo desativado (soft delete). ID: {}", id);
     }
 }

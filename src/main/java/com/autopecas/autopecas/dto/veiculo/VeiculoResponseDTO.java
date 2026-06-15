@@ -9,6 +9,7 @@ public record VeiculoResponseDTO(
         String modelo,
         Integer anoModelo,
         String cor,
+        Boolean ativo,
         UUID clienteId
 ) {
 }

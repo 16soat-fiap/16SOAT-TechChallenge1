@@ -62,8 +62,8 @@ public class OrdemServicoService {
         Cliente cliente = clienteRepository.findById(dto.clienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado com ID: " + dto.clienteId()));
 
-        Veiculo veiculo = veiculoRepository.findById(dto.veiculoId())
-                .orElseThrow(() -> new ResourceNotFoundException("Veículo não encontrado com ID: " + dto.veiculoId()));
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(dto.veiculoId())
+                .orElseThrow(() -> new ResourceNotFoundException("Veículo inativo ou não encontrado com ID: " + dto.veiculoId()));
 
         Long nextVal = ordemServicoRepository.proximoNumero();
         String numero = "OS-" + String.format("%06d", nextVal);

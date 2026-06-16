@@ -16,4 +16,5 @@ public interface VeiculoRepository extends JpaRepository<Veiculo, UUID> {
     List<Veiculo> findByClienteIdAndAtivoTrue(UUID clienteId);
     boolean existsByPlaca(String placa);
     boolean existsByChassi(String chassi);
+    Optional<Veiculo> findByChassi(String chassi);
 }

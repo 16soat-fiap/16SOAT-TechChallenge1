@@ -4,6 +4,7 @@ import com.autopecas.autopecas.domain.entity.*;
 import com.autopecas.autopecas.domain.enums.StatusOS;
 import com.autopecas.autopecas.dto.os.AtribuirMecanicoDTO;
 import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
+import com.autopecas.autopecas.dto.os.DiagnosticoDTO;
 import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
 import com.autopecas.autopecas.dto.os.OrdemServicoResponseDTO;
 import com.autopecas.autopecas.exception.BusinessException;
@@ -30,7 +31,6 @@ public class OrdemServicoService {
     private final FuncionarioRepository funcionarioRepository;
     private final HistoricoStatusOsRepository historicoStatusOsRepository;
     private final OrdemServicoMapper ordemServicoMapper;
-
 
     @Transactional(readOnly = true)
     public Page<OrdemServicoResponseDTO> listar(StatusOS status, UUID clienteId, UUID mecanicoId, Pageable pageable) {
@@ -75,24 +75,22 @@ public class OrdemServicoService {
                 .veiculo(veiculo)
                 .queixaCliente(dto.queixaCliente())
                 .observacoesEntrada(dto.observacoesEntrada())
+                .quilometragemEntrada(dto.quilometragemEntrada())
                 .build();
 
-        // Associar atendente se houver
         Atendente atendente = null;
         if (emailAtendente != null) {
-            Funcionario func = funcionarioRepository.findAll().stream()
-                    .filter(f -> emailAtendente.equals(f.getEmail()) && f instanceof Atendente)
-                    .findFirst()
+            atendente = funcionarioRepository.findByEmail(emailAtendente)
+                    .filter(f -> f instanceof Atendente)
+                    .map(f -> (Atendente) f)
                     .orElse(null);
-            if (func instanceof Atendente a) {
-                atendente = a;
+            if (atendente != null) {
                 os.setAtendenteRecepcao(atendente);
             }
         }
 
         OrdemServico salva = ordemServicoRepository.save(os);
 
-        // Registrar abertura no histórico
         HistoricoStatusOS historico;
         if (atendente != null) {
             historico = HistoricoStatusOS.abertura(salva, atendente);
@@ -127,13 +125,9 @@ public class OrdemServicoService {
 
         OrdemServico atualizada = ordemServicoRepository.save(os);
 
-        // Registrar no histórico
         Funcionario funcionario = null;
         if (emailFuncionario != null) {
-            funcionario = funcionarioRepository.findAll().stream()
-                    .filter(f -> emailFuncionario.equals(f.getEmail()))
-                    .findFirst()
-                    .orElse(null);
+            funcionario = funcionarioRepository.findByEmail(emailFuncionario).orElse(null);
         }
 
         HistoricoStatusOS historico;
@@ -147,6 +141,22 @@ public class OrdemServicoService {
 
         log.info("Status da OS {} avançado de {} para {}. Número: {}", id, statusAnterior, novoStatus, atualizada.getNumero());
         return ordemServicoMapper.toResponse(atualizada);
+    }
+
+    @Transactional
+    public OrdemServicoResponseDTO registrarDiagnostico(UUID id, DiagnosticoDTO dto) {
+        OrdemServico os = ordemServicoRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Ordem de serviço não encontrada com ID: " + id));
+
+        if (os.getStatus() != StatusOS.EM_DIAGNOSTICO) {
+            throw new BusinessException(
+                    "Diagnóstico só pode ser registrado quando a OS está em EM_DIAGNOSTICO. Status atual: " + os.getStatus());
+        }
+
+        os.setDiagnostico(dto.diagnostico());
+        OrdemServico salva = ordemServicoRepository.save(os);
+        log.info("Diagnóstico registrado na OS {}.", id);
+        return ordemServicoMapper.toResponse(salva);
     }
 
     @Transactional

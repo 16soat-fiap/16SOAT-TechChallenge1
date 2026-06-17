@@ -6,7 +6,6 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 @Entity
@@ -19,10 +18,6 @@ import java.util.List;
 @SuperBuilder
 @ToString(callSuper = true, exclude = {"ordensRecepcionadas", "ordensEntregues"})
 public class Atendente extends Funcionario {
-
-    //Desconto que um funcionário poderá dar a um cliente
-    @Column( name = "limite_desconto_percentual", precision = 5, scale = 2)
-    private BigDecimal limiteDescontoPercentual;
 
     //relacionamentos
 

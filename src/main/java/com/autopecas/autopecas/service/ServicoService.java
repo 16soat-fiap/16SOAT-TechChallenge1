@@ -24,7 +24,7 @@ public class ServicoService {
 
     @Transactional(readOnly = true)
     public List<ServicoResponseDTO> listar(){
-        return servicoRepository.findAll()
+        return servicoRepository.findByAtivoTrue()
                 .stream()
                 .map(servicoMapper::toResponse)
                 .toList();

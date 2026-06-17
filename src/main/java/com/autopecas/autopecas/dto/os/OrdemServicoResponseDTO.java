@@ -11,7 +11,7 @@ public record OrdemServicoResponseDTO(
         String queixaCliente,
         String diagnostico,
         BigDecimal valorTotalAprovado,
-        LocalDateTime createAt,
+        LocalDateTime createdAt,
         UUID clienteId,
         String clienteNome,
         UUID veiculoId,

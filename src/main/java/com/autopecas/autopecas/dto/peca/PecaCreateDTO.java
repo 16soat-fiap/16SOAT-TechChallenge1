@@ -15,10 +15,6 @@ public record PecaCreateDTO(
 
         String descricao,
 
-        @NotBlank(message = "Preço de custo obrigatório")
-        @Positive(message = "Preço é sempre positivo")
-        String categoria,
-
         @NotNull(message = "Preço de venda deve ser preenchido")
         @Positive(message = "Valor positivo")
         BigDecimal precoVenda,

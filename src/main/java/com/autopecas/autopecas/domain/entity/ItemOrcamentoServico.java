@@ -8,7 +8,6 @@ import java.math.BigDecimal;
 /**
  * Item de serviço dentro de um Orcamento
  *   - precoUnitario de Servico.precoBase na inclusão.
- *   - descontoUnitario / por unidade.
  *   - Mantém o valor histórico mesmo que catálogo mude.
  */
 @Entity
@@ -44,15 +43,10 @@ public class ItemOrcamentoServico {
     @Column(name = "preco_unitario", nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
 
-    @Column(name = "desconto_unitario", nullable = false, precision = 10, scale = 2)
-    @Builder.Default
-    private BigDecimal descontoUnitario = BigDecimal.ZERO;
-
     @Column(name = "observacao", length = 300)
     private String observacao;
 
-    public BigDecimal calcularSubtotalComDesconto() {
-        BigDecimal precoComDesconto = precoUnitario.subtract(descontoUnitario);
-        return precoComDesconto.multiply(BigDecimal.valueOf(quantidade));
+    public BigDecimal calcularSubtotal() {
+        return precoUnitario.multiply(BigDecimal.valueOf(quantidade));
     }
 }

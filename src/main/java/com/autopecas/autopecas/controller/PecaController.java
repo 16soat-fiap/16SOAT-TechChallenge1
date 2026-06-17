@@ -1,15 +1,9 @@
 package com.autopecas.autopecas.controller;
 
-import com.autopecas.autopecas.domain.entity.Peca;
-import com.autopecas.autopecas.domain.enums.TipoMovimentacaoEstoque;
 import com.autopecas.autopecas.dto.peca.MovimentacaoCreateDTO;
 import com.autopecas.autopecas.dto.peca.MovimentacaoResponseDTO;
 import com.autopecas.autopecas.dto.peca.PecaCreateDTO;
 import com.autopecas.autopecas.dto.peca.PecaResponseDTO;
-import com.autopecas.autopecas.exception.BusinessException;
-import com.autopecas.autopecas.exception.ResourceNotFoundException;
-import com.autopecas.autopecas.repository.PecaRepository;
-import com.autopecas.autopecas.service.EstoqueService;
 import com.autopecas.autopecas.service.PecaService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,16 +20,14 @@ import java.util.UUID;
 public class PecaController {
 
     private final PecaService pecaService;
-    private final EstoqueService estoqueService;
-    private final PecaRepository pecaRepository;
 
     @GetMapping
-    public ResponseEntity<List<PecaResponseDTO>> listar(@RequestParam(required = false) Boolean estoqueBaixo){
+    public ResponseEntity<List<PecaResponseDTO>> listar(@RequestParam(required = false) Boolean estoqueBaixo) {
         return ResponseEntity.ok(pecaService.listar(estoqueBaixo));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<PecaResponseDTO> buscarPorId(@PathVariable UUID id){
+    public ResponseEntity<PecaResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(pecaService.buscarPorId(id));
     }
 
@@ -66,28 +58,6 @@ public class PecaController {
     public ResponseEntity<MovimentacaoResponseDTO> registrarMovimentacao(
             @PathVariable UUID id,
             @Valid @RequestBody MovimentacaoCreateDTO dto) {
-
-        Peca peca = pecaRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Peça"+id+"não encontrada"));
-
-        TipoMovimentacaoEstoque tipo;
-        try {
-            tipo = TipoMovimentacaoEstoque.valueOf(dto.tipo().toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException("Tipo de movimentação inválido: " + dto.tipo());
-        }
-
-        var movimentacao = estoqueService.registrarMovimentacao(peca, tipo, dto.quantidade(), dto.motivo(), null, null);
-
-        MovimentacaoResponseDTO response = new MovimentacaoResponseDTO(
-                movimentacao.getId(),
-                movimentacao.getTipo().name(),
-                movimentacao.getQuantidade(),
-                movimentacao.getSaldoApos(),
-                movimentacao.getMotivo(),
-                movimentacao.getCreatedAt()
-        );
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        return ResponseEntity.status(HttpStatus.CREATED).body(pecaService.registrarMovimentacao(id, dto));
     }
-
 }

@@ -15,5 +15,9 @@ public interface PecaRepository extends JpaRepository<Peca, UUID> {
     List<Peca> findByAtivoTrue();
     @Query("SELECT p FROM Peca p WHERE p.ativo = true AND p.quantidadeEstoque <= p.quantidadeMinima")
     List<Peca> findEstoqueBaixo();
+
+    @Query("SELECT COUNT(p) FROM Peca p WHERE p.ativo = true AND p.quantidadeEstoque <= p.quantidadeMinima")
+    long countEstoqueBaixo();
+
     boolean existsByCodigo(String codigo);
 }

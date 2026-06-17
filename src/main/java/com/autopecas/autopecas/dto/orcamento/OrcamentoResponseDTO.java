@@ -12,9 +12,9 @@ public record OrcamentoResponseDTO(
         BigDecimal valorMaoObra,
         BigDecimal valorPecas,
         BigDecimal valorTotal,
-        String condicosPagamento,
+        String condicoesPagamento,
         Integer prazoExecucaoDias,
         LocalDate dataValidade,
-        LocalDateTime createAt
+        LocalDateTime createdAt
 ) {
 }

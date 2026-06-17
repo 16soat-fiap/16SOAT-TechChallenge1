@@ -23,12 +23,14 @@ public interface OrdemServicoRepository extends JpaRepository<OrdemServico, UUID
     Page<OrdemServico> findByMecanicoResponsavelId(UUID mecanicoId, Pageable pageable);
 
     @Query("SELECT o FROM OrdemServico o WHERE o.createdAt BETWEEN :inicio AND :fim")
-    Page<OrdemServico> findByPeriodo(@Param("inicio")LocalDateTime inicio,
-                                     @Param("fim")LocalDateTime fim,
+    Page<OrdemServico> findByPeriodo(@Param("inicio") LocalDateTime inicio,
+                                     @Param("fim") LocalDateTime fim,
                                      Pageable pageable);
 
-    @Query(value = "SELECT nextval('os_numero_seq)", nativeQuery = true)
+    @Query(value = "SELECT nextval('os_numero_seq')", nativeQuery = true)
     Long proximoNumero();
+
     List<OrdemServico> findByStatusIn(List<StatusOS> statusOS);
 
+    long countByStatus(StatusOS status);
 }

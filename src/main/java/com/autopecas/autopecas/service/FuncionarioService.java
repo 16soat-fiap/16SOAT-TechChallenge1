@@ -27,7 +27,7 @@ public class FuncionarioService {
     private final FuncionarioMapper funcionarioMapper;
 
     @Transactional(readOnly = true)
-    public List<FuncionarioResponseDTO> listar(){
+    public List<FuncionarioResponseDTO> listar() {
         return funcionarioRepository.findByAtivoTrue()
                 .stream()
                 .map(funcionarioMapper::toResponse)
@@ -35,20 +35,22 @@ public class FuncionarioService {
     }
 
     @Transactional(readOnly = true)
-    public FuncionarioResponseDTO buscarPorId(UUID id){
+    public FuncionarioResponseDTO buscarPorId(UUID id) {
         Funcionario funcionario = funcionarioRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Funcionário não encontrado, id: " + id));
         return funcionarioMapper.toResponse(funcionario);
     }
 
     @Transactional
-    public FuncionarioResponseDTO criarMecanico(MecanicoCreateDTO dto){
+    public FuncionarioResponseDTO criarMecanico(MecanicoCreateDTO dto) {
         validarCpfUnico(dto.cpf());
-        long count = funcionarioRepository.count();
-        String matricula = String.format("MEC-%04d", count + 1);
+
+        Long seq = funcionarioRepository.proximoNumeroMecanico();
+        String matricula = String.format("MEC-%04d", seq);
 
         Mecanico mecanico = Mecanico.builder()
                 .matricula(matricula)
+                .nome(dto.nome())
                 .cpf(dto.cpf())
                 .email(dto.email())
                 .telefone(dto.telefone())
@@ -61,11 +63,11 @@ public class FuncionarioService {
     }
 
     @Transactional
-    public FuncionarioResponseDTO criarAtendente(AtendenteCreateDTO dto){
+    public FuncionarioResponseDTO criarAtendente(AtendenteCreateDTO dto) {
         validarCpfUnico(dto.cpf());
 
-        long count = funcionarioRepository.count();
-        String matricula = String.format("ATD-%04d", count+1);
+        Long seq = funcionarioRepository.proximoNumeroAtendente();
+        String matricula = String.format("ATD-%04d", seq);
 
         Atendente atendente = Atendente.builder()
                 .matricula(matricula)
@@ -77,11 +79,9 @@ public class FuncionarioService {
                 .build();
 
         Atendente salvo = funcionarioRepository.save(atendente);
-        log.info("Atendente criada. ID: {}, Matricula {}", salvo.getId(), salvo.getMatricula());
+        log.info("Atendente criado. ID: {}, Matrícula {}", salvo.getId(), salvo.getMatricula());
         return funcionarioMapper.toResponse(salvo);
     }
-
-
 
     @Transactional
     public void desativar(UUID id) {
@@ -92,8 +92,8 @@ public class FuncionarioService {
         log.info("Funcionário desativado. ID: {}", id);
     }
 
-    private void validarCpfUnico(String cpf){
-        if(funcionarioRepository.existsByCpf(cpf)){
+    private void validarCpfUnico(String cpf) {
+        if (funcionarioRepository.existsByCpf(cpf)) {
             throw new BusinessException("CPF: " + cpf + " , já cadastrado");
         }
     }

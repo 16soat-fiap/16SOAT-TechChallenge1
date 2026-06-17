@@ -65,7 +65,7 @@ public class VeiculoService {
     public VeiculoResponseDTO criar(VeiculoCreateDTO dto) {
         String placaFormatada = dto.placa().toUpperCase();
         if (veiculoRepository.existsByPlaca(placaFormatada)) {
-            throw new ResourceNotFoundException("Placa " + placaFormatada + " já cadastrada");
+            throw new BusinessException("Placa " + placaFormatada + " já cadastrada");
         }
 
         Cliente cliente = clienteRepository.findById(dto.clienteId())
@@ -122,14 +122,9 @@ public class VeiculoService {
     }
 
     private void validarRenavamDuplicado(String renavam, UUID id) {
-        Optional<Veiculo> veiculoExistente = veiculoRepository.findAllByAtivoTrue()
-                .stream()
-                .filter(v -> renavam.equals(v.getRenavam()))
-                .findFirst();
-
-        if (veiculoExistente.isPresent() && !veiculoExistente.get().getId().equals(id)) {
-            throw new BusinessException("RENAVAM já cadastrado.");
-        }
+        veiculoRepository.findByRenavam(renavam)
+                .filter(v -> !v.getId().equals(id))
+                .ifPresent(v -> { throw new BusinessException("RENAVAM já cadastrado."); });
     }
 
     private void validarChassiDuplicado(String chassi, UUID veiculoId) {

@@ -1,6 +1,5 @@
 package com.autopecas.autopecas.domain.entity;
 
-import com.autopecas.autopecas.domain.enums.CategoriaPeca;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -24,8 +23,7 @@ import java.util.UUID;
 @Table(
         name = "pecas",
         uniqueConstraints = {
-                @UniqueConstraint(name = "uk_peca_codigo",       columnNames = "codigo"),
-                @UniqueConstraint(name = "uk_peca_codigo_barras", columnNames = "codigo_barras")
+                @UniqueConstraint(name = "uk_peca_codigo", columnNames = "codigo")
         }
 )
 @Getter
@@ -55,10 +53,6 @@ public class Peca {
     @Column(name = "marca")
     private String marca;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "categoria", nullable = false)
-    private CategoriaPeca categoria;
-
     @Column(name = "preco_venda", nullable = false, precision = 10, scale = 2)
     private BigDecimal precoVenda;
 
@@ -75,11 +69,6 @@ public class Peca {
     @Column(name = "unidade", nullable = false, length = 10)
     @Builder.Default
     private String unidade = "un";
-
-    /** OPCIONAL - PODEMOS EXCLUIR ISSO */
-    @Column(name = "garantia_dias", nullable = false)
-    @Builder.Default
-    private Integer garantiaDias = 90;
 
     @Column(name = "ativo", nullable = false)
     @Builder.Default

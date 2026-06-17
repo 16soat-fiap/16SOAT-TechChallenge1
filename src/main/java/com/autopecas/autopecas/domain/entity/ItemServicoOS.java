@@ -57,11 +57,6 @@ public class ItemServicoOS {
     @Column(name = "preco_unitario", nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
 
-    /** Desconto por unidade (já aplicado no orçamento aprovado). */
-    @Column(name = "desconto_unitario", nullable = false, precision = 10, scale = 2)
-    @Builder.Default
-    private BigDecimal descontoUnitario = BigDecimal.ZERO;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     @Builder.Default
@@ -79,20 +74,13 @@ public class ItemServicoOS {
     @Column(name = "data_fim_execucao")
     private LocalDateTime dataFimExecucao;
 
-    /** OPCIONAL podemos retirara garantia ou criar validações
-     * com ela */
-    @Column(name = "garantia_dias", nullable = false)
-    @Builder.Default
-    private Integer garantiaDias = 90;
-
     @Column(name = "observacao", length = 500)
     private String observacao;
 
     // Métodos ---------------------------------------
 
     public BigDecimal calcularSubtotal(){
-        BigDecimal precoComDesconto = precoUnitario.subtract(descontoUnitario);
-        return precoComDesconto.multiply(BigDecimal.valueOf(quantidade));
+        return precoUnitario.multiply(BigDecimal.valueOf(quantidade));
     }
 
     public void iniciarExecucao(Mecanico mecanico) {

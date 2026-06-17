@@ -18,8 +18,7 @@ import java.util.UUID;
  * Subclasses guardam campos específicos do papel
  * Subclasses:
  * -Mecanico: executa o processo/manutenção.
- * -Atendente: inicia as OS, autorização para descontos.
- * -Gestor: área de gestão.
+ * -Atendente: inicia as OS.
  *
  * matricula é única, imutável e usada como crachá.
  */
@@ -29,8 +28,7 @@ import java.util.UUID;
         name = "funcionarios",
         uniqueConstraints = {
                 @UniqueConstraint(name = "uk_funcionario_matricula", columnNames = "matricula"),
-                @UniqueConstraint(name = "uk_funcionario_cpf",       columnNames = "cpf"),
-                @UniqueConstraint(name = "uk_funcionario_usuario",   columnNames = "usuario_id")
+                @UniqueConstraint(name = "uk_funcionario_cpf",       columnNames = "cpf")
         }
 )
 @Inheritance(strategy = InheritanceType.JOINED)

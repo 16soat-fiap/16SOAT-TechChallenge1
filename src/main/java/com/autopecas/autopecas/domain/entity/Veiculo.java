@@ -1,6 +1,5 @@
 package com.autopecas.autopecas.domain.entity;
 
-import com.autopecas.autopecas.domain.enums.TipoCambio;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;

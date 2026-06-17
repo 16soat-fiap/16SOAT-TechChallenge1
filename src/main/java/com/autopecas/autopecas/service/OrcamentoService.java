@@ -19,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -40,7 +39,7 @@ public class OrcamentoService {
         if (!ordemServicoRepository.existsById(osId)) {
             throw new ResourceNotFoundException("Ordem de serviço não encontrada com ID: " + osId);
         }
-        return orcamentoRepository.findById(osId)
+        return orcamentoRepository.findByOrdemServicoId(osId)
                 .stream()
                 .map(orcamentoMapper::toResponse)
                 .toList();
@@ -142,13 +141,11 @@ public class OrcamentoService {
         os.setValorTotalAprovado(orcamento.getValorTotal());
 
         // Copiar itens de serviço do orçamento para a OS
-        List<ItemServicoOS> itensServicoOS = new ArrayList<>();
         for (ItemOrcamentoServico itemOrc : orcamento.getItensServico()) {
             ItemServicoOS itemOS = ItemServicoOS.builder()
                     .servico(itemOrc.getServico())
                     .quantidade(itemOrc.getQuantidade())
                     .precoUnitario(itemOrc.getPrecoUnitario())
-                    .descontoUnitario(itemOrc.getDescontoUnitario())
                     .build();
             os.adicionarItemServico(itemOS);
         }
@@ -159,7 +156,6 @@ public class OrcamentoService {
                     .peca(itemOrc.getPeca())
                     .quantidade(itemOrc.getQuantidade())
                     .precoUnitario(itemOrc.getPrecoUnitario())
-                    .descontoUnitario(itemOrc.getDescontoUnitario())
                     .build();
             os.adicionarItemPeca(itemOS);
 

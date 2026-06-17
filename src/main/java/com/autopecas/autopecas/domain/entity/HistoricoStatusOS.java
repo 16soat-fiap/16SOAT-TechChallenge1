@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
  *
  * Rastreabilidade
  *- alteradoPor : string
- *- executadoPor: Funcionario (Mecanico/Atendente/Gestor)
+ *- executadoPor: Funcionario (Mecanico/Atendente)
  *
  * Regras:
  *- Registros não são alterados nem deletados.
@@ -64,7 +64,7 @@ public class HistoricoStatusOS {
     private String alteradoPor;
 
     /**
-     * Funcionário que executou a mudança (Mecanico, Atendente ou Gestor).
+     * Funcionário que executou a mudança (Mecanico ou Atendente).
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "executado_por_id",

@@ -9,9 +9,8 @@ import java.math.BigDecimal;
  * Item de peça dentro de um Orcamento
  *
  *   - precoUnitario é COPIADO de Peca.precoVenda na inclusão.
- *   - descontoUnitario é o desconto aplicado por unidade.
  *   - Não decrementa estoque — isso só acontece quando o Orcamento é aprovado
- *     e a OS avança para EM_EXECUCAO (implementar no service).
+ *     e a OS avança para EM_EXECUCAO.
  */
 @Entity
 @Table(name = "itens_orcamento_peca")
@@ -45,13 +44,8 @@ public class ItemOrcamentoPeca {
     @Column(name = "preco_unitario", nullable = false, precision = 10, scale = 2)
     private BigDecimal precoUnitario;
 
-    @Column(name = "desconto_unitario", nullable = false, precision = 10, scale = 2)
-    @Builder.Default
-    private BigDecimal descontoUnitario = BigDecimal.ZERO;
-
-    public BigDecimal calcularSubtotalComDesconto() {
-        BigDecimal precoComDesconto = precoUnitario.subtract(descontoUnitario);
-        return precoComDesconto.multiply(BigDecimal.valueOf(quantidade));
+    public BigDecimal calcularSubtotal() {
+        return precoUnitario.multiply(BigDecimal.valueOf(quantidade));
     }
 }
 

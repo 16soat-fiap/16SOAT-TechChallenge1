@@ -5,12 +5,12 @@ import com.autopecas.autopecas.dto.os.*;
 import com.autopecas.autopecas.service.OrdemServicoService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.apache.tomcat.util.net.openssl.ciphers.Authentication;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -24,10 +24,10 @@ public class OrdemServicoController {
 
     @GetMapping
     public ResponseEntity<Page<OrdemServicoResponseDTO>> listar(
-            @RequestParam(required = false)StatusOS status,
-            @RequestParam(required = false)UUID clienteId,
+            @RequestParam(required = false) StatusOS status,
+            @RequestParam(required = false) UUID clienteId,
             @RequestParam(required = false) UUID mecanicoId,
-            @PageableDefault(size = 20)Pageable pageable){
+            @PageableDefault(size = 20) Pageable pageable) {
         return ResponseEntity.ok(ordemServicoService.listar(status, clienteId, mecanicoId, pageable));
     }
 
@@ -40,7 +40,7 @@ public class OrdemServicoController {
     public ResponseEntity<OrdemServicoResponseDTO> criar(
             @Valid @RequestBody OrdemServicoCreateDTO dto,
             Authentication authentication) {
-        String email = authentication != null ? authentication.name() : null;
+        String email = authentication != null ? authentication.getName() : null;
         return ResponseEntity.status(HttpStatus.CREATED).body(ordemServicoService.criar(dto, email));
     }
 
@@ -49,8 +49,15 @@ public class OrdemServicoController {
             @PathVariable UUID id,
             @Valid @RequestBody AvancarStatusDTO dto,
             Authentication authentication) {
-        String email = authentication != null ? authentication.name() : null;
+        String email = authentication != null ? authentication.getName() : null;
         return ResponseEntity.ok(ordemServicoService.avancarStatus(id, dto, email));
+    }
+
+    @PatchMapping("/{id}/diagnostico")
+    public ResponseEntity<OrdemServicoResponseDTO> registrarDiagnostico(
+            @PathVariable UUID id,
+            @Valid @RequestBody DiagnosticoDTO dto) {
+        return ResponseEntity.ok(ordemServicoService.registrarDiagnostico(id, dto));
     }
 
     @PatchMapping("/{id}/mecanico")
@@ -59,6 +66,4 @@ public class OrdemServicoController {
             @Valid @RequestBody AtribuirMecanicoDTO dto) {
         return ResponseEntity.ok(ordemServicoService.atribuirMecanico(id, dto));
     }
-
-
 }

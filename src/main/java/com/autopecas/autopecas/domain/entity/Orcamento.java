@@ -47,7 +47,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@ToString(exclude = {"ordemServico", "itensServico", "itensPeca", "elaboradoPor", "aprovadoPorGestor"})
+@ToString(exclude = {"ordemServico", "itensServico", "itensPeca", "elaboradoPor"})
 @EqualsAndHashCode(of = "id")
 public class Orcamento {
 
@@ -78,10 +78,6 @@ public class Orcamento {
     @Column(name = "valor_pecas", nullable = false, precision = 10, scale = 2)
     @Builder.Default
     private BigDecimal valorPecas = BigDecimal.ZERO;
-
-    @Column(name = "valor_desconto", nullable = false, precision = 10, scale = 2)
-    @Builder.Default
-    private BigDecimal valorDesconto = BigDecimal.ZERO;
 
     @Column(name = "valor_acrescimo", nullable = false, precision = 10, scale = 2)
     @Builder.Default
@@ -142,12 +138,6 @@ public class Orcamento {
             foreignKey = @ForeignKey(name = "fk_orcamento_elaborador"))
     private Atendente elaboradoPor;
 
-    // Gestor que aprovou desconto/orçamento (quando atendente não tem autonomia para o valor).
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "aprovado_por_gestor_id",
-            foreignKey = @ForeignKey(name = "fk_orcamento_gestor"))
-    private Gestor aprovadoPorGestor;
-
     @OneToMany(mappedBy = "orcamento", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default
     private List<ItemOrcamentoServico> itensServico = new ArrayList<>();
@@ -161,16 +151,15 @@ public class Orcamento {
     //recalcula
     public void recalcular() {
         this.valorMaoObra = itensServico.stream()
-                .map(ItemOrcamentoServico::calcularSubtotalComDesconto)
+                .map(ItemOrcamentoServico::calcularSubtotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.valorPecas = itensPeca.stream()
-                .map(ItemOrcamentoPeca::calcularSubtotalComDesconto)
+                .map(ItemOrcamentoPeca::calcularSubtotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         this.valorTotal = valorMaoObra
                 .add(valorPecas)
-                .subtract(valorDesconto)
                 .add(valorAcrescimo);
     }
 

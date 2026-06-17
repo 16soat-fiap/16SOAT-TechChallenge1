@@ -2,6 +2,7 @@ package com.autopecas.autopecas.repository;
 
 import com.autopecas.autopecas.domain.entity.Funcionario;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -12,7 +13,14 @@ import java.util.UUID;
 public interface FuncionarioRepository extends JpaRepository<Funcionario, UUID> {
     Optional<Funcionario> findByMatricula(String matricula);
     Optional<Funcionario> findByCpf(String cpf);
+    Optional<Funcionario> findByEmail(String email);
     List<Funcionario> findByAtivoTrue();
     boolean existsByCpf(String cpf);
     boolean existsByMatricula(String matricula);
+
+    @Query(value = "SELECT nextval('mecanico_seq')", nativeQuery = true)
+    Long proximoNumeroMecanico();
+
+    @Query(value = "SELECT nextval('atendente_seq')", nativeQuery = true)
+    Long proximoNumeroAtendente();
 }

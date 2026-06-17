@@ -11,7 +11,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,26 +26,12 @@ public class DashboardService {
     private final PecaRepository pecaRepository;
 
     @Transactional(readOnly = true)
-    public DashboardDTO obterDashboard(){
-        List<OrdemServico> todasOs = ordemServicoRepository.findAll();
-
-        long totalOsAbertas = todasOs.stream()
-                .filter(os -> os.getStatus() == StatusOS.RECEBIDA)
-                .count();
-
-        long totalOsEmExecucao = todasOs.stream()
-                .filter(os -> os.getStatus() == StatusOS.EM_EXECUCAO)
-                .count();
-
-        long totalOsFinalizadas = todasOs.stream()
-                .filter(os -> os.getStatus() == StatusOS.FINALIZADA)
-                .count();
-
-        long totalOsEntregues = todasOs.stream()
-                .filter(os -> os.getStatus() == StatusOS.ENTREGUE)
-                .count();
-
-        long estoqueBaixoCount = pecaRepository.findEstoqueBaixo().size();
+    public DashboardDTO obterDashboard() {
+        long totalOsAbertas     = ordemServicoRepository.countByStatus(StatusOS.RECEBIDA);
+        long totalOsEmExecucao  = ordemServicoRepository.countByStatus(StatusOS.EM_EXECUCAO);
+        long totalOsFinalizadas = ordemServicoRepository.countByStatus(StatusOS.FINALIZADA);
+        long totalOsEntregues   = ordemServicoRepository.countByStatus(StatusOS.ENTREGUE);
+        long estoqueBaixoCount  = pecaRepository.countEstoqueBaixo();
 
         return new DashboardDTO(
                 totalOsAbertas,
@@ -58,15 +43,11 @@ public class DashboardService {
     }
 
     @Transactional(readOnly = true)
-    public List<TempoMedioDTO> tempoMedioExecucao(){
+    public List<TempoMedioDTO> tempoMedioExecucao() {
         List<OrdemServico> osFinalizadas = ordemServicoRepository
-                .findByStatusIn(List.of(
-                        StatusOS.FINALIZADA, StatusOS.ENTREGUE
-                ));
+                .findByStatusIn(List.of(StatusOS.FINALIZADA, StatusOS.ENTREGUE));
 
-
-        Map<UUID, List<Long>> tempoPorMecanico = osFinalizadas
-                .stream()
+        Map<UUID, List<Long>> tempoPorMecanico = osFinalizadas.stream()
                 .filter(os -> os.getMecanicoResponsavel() != null)
                 .filter(os -> os.calcularTempoExecucaoMinutos() != null)
                 .collect(Collectors.groupingBy(
@@ -84,7 +65,6 @@ public class DashboardService {
 
             double media = tempos.stream().mapToLong(Long::longValue).average().orElse(0.0);
 
-            // Evitar duplicatas no resultado
             boolean jaAdicionado = resultado.stream().anyMatch(t -> t.mecanicoId().equals(mecanicoId));
             if (!jaAdicionado) {
                 resultado.add(new TempoMedioDTO(mecanicoId, mecanicoNome, media));
@@ -92,7 +72,5 @@ public class DashboardService {
         }
 
         return resultado;
-
-
     }
 }

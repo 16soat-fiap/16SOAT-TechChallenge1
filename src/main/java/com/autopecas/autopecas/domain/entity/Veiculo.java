@@ -82,6 +82,10 @@ public class Veiculo {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "ativo", nullable = false)
+    @Builder.Default
+    private Boolean ativo = true;
+
     // ─── Relacionamentos
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -92,4 +96,3 @@ public class Veiculo {
     @Builder.Default
     private List<OrdemServico> ordensServico = new ArrayList<>();
 }
-

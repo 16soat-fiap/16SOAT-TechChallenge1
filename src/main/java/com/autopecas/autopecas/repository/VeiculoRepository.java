@@ -10,8 +10,11 @@ import java.util.UUID;
 
 @Repository
 public interface VeiculoRepository extends JpaRepository<Veiculo, UUID> {
-    Optional<Veiculo> findByPlaca(String placa);
-    List<Veiculo> findByClienteId(UUID clienteId);
+    List<Veiculo> findAllByAtivoTrue();
+    Optional<Veiculo> findByIdAndAtivoTrue(UUID id);
+    Optional<Veiculo> findByPlacaAndAtivoTrue(String placa);
+    List<Veiculo> findByClienteIdAndAtivoTrue(UUID clienteId);
     boolean existsByPlaca(String placa);
     boolean existsByChassi(String chassi);
+    Optional<Veiculo> findByChassi(String chassi);
 }

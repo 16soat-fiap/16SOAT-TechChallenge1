@@ -4,6 +4,8 @@ import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.Veiculo;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoResponseDTO;
+import com.autopecas.autopecas.dto.veiculo.VeiculoUpdateDTO;
+import com.autopecas.autopecas.exception.BusinessException;
 import com.autopecas.autopecas.exception.ResourceNotFoundException;
 import com.autopecas.autopecas.mapper.VeiculoMapper;
 import com.autopecas.autopecas.repository.ClienteRepository;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -26,42 +29,42 @@ public class VeiculoService {
     private final VeiculoMapper veiculoMapper;
 
     @Transactional(readOnly = true)
-    public List<VeiculoResponseDTO> listar(){
-        return veiculoRepository.findAll()
+    public List<VeiculoResponseDTO> listar() {
+        return veiculoRepository.findAllByAtivoTrue()
                 .stream()
                 .map(veiculoMapper::toResponse)
                 .toList();
     }
 
     @Transactional(readOnly = true)
-    public VeiculoResponseDTO buscarPorId(UUID id){
-        Veiculo veiculo = veiculoRepository.findById(id)
+    public VeiculoResponseDTO buscarPorId(UUID id) {
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Veiculo não encontrado, id " + id));
         return veiculoMapper.toResponse(veiculo);
     }
 
     @Transactional(readOnly = true)
-    public VeiculoResponseDTO buscarPorPlaca(String placa){
-        Veiculo veiculo = veiculoRepository.findByPlaca(placa.toUpperCase())
+    public VeiculoResponseDTO buscarPorPlaca(String placa) {
+        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(placa.toUpperCase())
                 .orElseThrow(() -> new ResourceNotFoundException("Placa " + placa + " Não encontrada"));
         return veiculoMapper.toResponse(veiculo);
     }
 
     @Transactional(readOnly = true)
-    public List<VeiculoResponseDTO> listarPorCliente(UUID clienteId){
-        if(!clienteRepository.existsById(clienteId)){
+    public List<VeiculoResponseDTO> listarPorCliente(UUID clienteId) {
+        if (!clienteRepository.existsById(clienteId)) {
             throw new ResourceNotFoundException("Cliente não encontrado, id: " + clienteId);
         }
-        return veiculoRepository.findByClienteId(clienteId)
+        return veiculoRepository.findByClienteIdAndAtivoTrue(clienteId)
                 .stream()
                 .map(veiculoMapper::toResponse)
                 .toList();
     }
 
     @Transactional
-    public VeiculoResponseDTO criar(VeiculoCreateDTO dto){
+    public VeiculoResponseDTO criar(VeiculoCreateDTO dto) {
         String placaFormatada = dto.placa().toUpperCase();
-        if(veiculoRepository.existsByPlaca(placaFormatada)){
+        if (veiculoRepository.existsByPlaca(placaFormatada)) {
             throw new ResourceNotFoundException("Placa " + placaFormatada + " já cadastrada");
         }
 
@@ -85,25 +88,63 @@ public class VeiculoService {
     }
 
     @Transactional
-    public VeiculoResponseDTO atualizar(UUID id, VeiculoCreateDTO dto) {
-        Veiculo veiculo = veiculoRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Veículo " +id+ " não encontrado com ID: "));
+    public VeiculoResponseDTO atualizar(UUID id, VeiculoUpdateDTO dto) {
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Veículo não encontrado, id: " + id));
 
-        if (dto.marca() != null && !dto.marca().isBlank()) {
+        if (dto.marca() != null) {
             veiculo.setMarca(dto.marca());
         }
-        if (dto.modelo() != null && !dto.modelo().isBlank()) {
+
+        if (dto.modelo() != null) {
             veiculo.setModelo(dto.modelo());
         }
+
         if (dto.anoModelo() != null) {
             veiculo.setAnoModelo(dto.anoModelo());
         }
         if (dto.cor() != null) {
             veiculo.setCor(dto.cor());
         }
+        if (dto.chassi() != null) {
+            validarChassiDuplicado(dto.chassi(), id);
+            veiculo.setChassi(dto.chassi());
+        }
+        if (dto.renavam() != null) {
+            validarRenavamDuplicado(dto.renavam(), id);
+            veiculo.setRenavam(dto.renavam());
+        }
+
 
         Veiculo atualizado = veiculoRepository.save(veiculo);
-        log.info("Veículo atualizado. ID: {}", atualizado.getId());
+        log.info("Veículo atualizado. ID: {}, Placa: {}", atualizado.getId(), atualizado.getPlaca());
         return veiculoMapper.toResponse(atualizado);
+    }
+
+    private void validarRenavamDuplicado(String renavam, UUID id) {
+        Optional<Veiculo> veiculoExistente = veiculoRepository.findAllByAtivoTrue()
+                .stream()
+                .filter(v -> renavam.equals(v.getRenavam()))
+                .findFirst();
+
+        if (veiculoExistente.isPresent() && !veiculoExistente.get().getId().equals(id)) {
+            throw new BusinessException("RENAVAM já cadastrado.");
+        }
+    }
+
+    private void validarChassiDuplicado(String chassi, UUID veiculoId) {
+        Optional<Veiculo> veiculoExistente = veiculoRepository.findByChassi(chassi);
+        if (veiculoExistente.isPresent() && !veiculoExistente.get().getId().equals(veiculoId)) {
+            throw new BusinessException("Chassi já cadastrado.");
+        }
+    }
+
+    @Transactional
+    public void deletar(UUID id) {
+        Veiculo veiculo = veiculoRepository.findByIdAndAtivoTrue(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Veículo não encontrado, id: " + id));
+        veiculo.setAtivo(false);
+        veiculoRepository.save(veiculo);
+        log.info("Veículo desativado (soft delete). ID: {}", id);
     }
 }

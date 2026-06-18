@@ -22,14 +22,14 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(EstoqueInsuficienteException.class)
     public ResponseEntity<ErrorResponse> handleEstoqueInsuficiente(EstoqueInsuficienteException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body(new ErrorResponse(HttpStatus.UNPROCESSABLE_ENTITY.value(), "Estoque insuficiente", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.valueOf(422))
+                .body(new ErrorResponse(422, "Estoque insuficiente", ex.getMessage()));
     }
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ErrorResponse> handleBusiness(BusinessException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                .body(new ErrorResponse(HttpStatus.UNPROCESSABLE_ENTITY.value(), "Regra de negócio violada", ex.getMessage()));
+        return ResponseEntity.status(HttpStatus.valueOf(422))
+                .body(new ErrorResponse(422, "Regra de negócio violada", ex.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

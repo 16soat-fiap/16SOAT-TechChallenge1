@@ -1,6 +1,5 @@
 package com.autopecas.autopecas.dto.veiculo;
 
-import com.autopecas.autopecas.domain.entity.Cliente;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 

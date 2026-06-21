@@ -45,7 +45,8 @@ public class VeiculoService {
 
     @Transactional(readOnly = true)
     public VeiculoResponseDTO buscarPorPlaca(String placa) {
-        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(placa.toUpperCase())
+        String placaFormatada = formatarPlaca(placa);
+        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(placaFormatada)
                 .orElseThrow(() -> new ResourceNotFoundException("Placa " + placa + " Não encontrada"));
         return veiculoMapper.toResponse(veiculo);
     }
@@ -63,10 +64,8 @@ public class VeiculoService {
 
     @Transactional
     public VeiculoResponseDTO criar(VeiculoCreateDTO dto) {
-        String placaFormatada = dto.placa().toUpperCase();
-        if (veiculoRepository.existsByPlaca(placaFormatada)) {
-            throw new BusinessException("Placa " + placaFormatada + " já cadastrada");
-        }
+
+        String placaFormatada  = validarPlaca(dto.placa());
 
         Cliente cliente = clienteRepository.findById(dto.clienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado, id: " + dto.clienteId()));
@@ -119,6 +118,31 @@ public class VeiculoService {
         Veiculo atualizado = veiculoRepository.save(veiculo);
         log.info("Veículo atualizado. ID: {}, Placa: {}", atualizado.getId(), atualizado.getPlaca());
         return veiculoMapper.toResponse(atualizado);
+    }
+
+    private String validarPlaca(String placa) {
+        if (placa == null || placa.trim().isEmpty()) {
+            throw new BusinessException("A placa não pode estar vazia.");
+        }
+
+        String placaLimpa = formatarPlaca(placa);
+
+        String placaAntiga = "^[A-Z]{3}[0-9]{4}$";
+        String placaMercosul = "^[A-Z]{3}[0-9][A-Z][0-9]{2}$";
+
+        if (!placaLimpa.matches(placaAntiga) && !placaLimpa.matches(placaMercosul)) {
+            throw new BusinessException("Placa de veículo com formato inválido.");
+        }
+
+        if (veiculoRepository.existsByPlaca(placaLimpa)) {
+            throw new BusinessException("Placa já cadastrada.");
+        }
+
+        return placaLimpa;
+    }
+
+    private String formatarPlaca(String placa){
+        return placa.replace("-", "").trim().toUpperCase();
     }
 
     private void validarRenavamDuplicado(String renavam, UUID id) {

@@ -14,6 +14,7 @@ import com.autopecas.autopecas.mapper.ClienteMapper;
 import com.autopecas.autopecas.repository.ClientePFRepository;
 import com.autopecas.autopecas.repository.ClientePJRepository;
 import com.autopecas.autopecas.repository.ClienteRepository;
+import com.autopecas.autopecas.utils.DocumentValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -58,8 +59,8 @@ public class ClienteService {
 
     @Transactional
     public ClienteResponseDTO criarPF(ClienteCreatePFDTO dto){
-        if (!dto.cpf().matches("\\d{11}")){
-            throw new BusinessException("CPF inválido. Deve conter 11 dígitos numéricos.");
+        if (!DocumentValidator.validarCPF(dto.cpf())){
+            throw new BusinessException("CPF inválido");
         }
         if (clientePFRepository.existsByCpf(dto.cpf())){
             throw new BusinessException("CPF já cadastrado: " + dto.cpf());
@@ -83,6 +84,7 @@ public class ClienteService {
                 .dataNascimento(dto.dataNascimento())
                 .rg(dto.rg())
                 .genero(genero)
+                .ativo(true)
                 .build();
 
         ClientePF salvo = clientePFRepository.save(cliente);
@@ -92,8 +94,8 @@ public class ClienteService {
 
     @Transactional
     public ClienteResponseDTO criarPJ(ClienteCreatePJDTO dto){
-        if (!dto.cnpj().matches("\\d{14}")){
-            throw new BusinessException("CNPJ inválido. Deve conter 14 dígitos");
+        if (!DocumentValidator.validarCNPJ(dto.cnpj())){
+            throw new BusinessException("CNPJ inválido");
         }
         if (clientePJRepository.existsByCnpj(dto.cnpj())){
             throw new BusinessException("CNPJ já cadastrado: " + dto.cnpj());

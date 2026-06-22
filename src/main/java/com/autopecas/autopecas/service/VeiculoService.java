@@ -135,7 +135,7 @@ public class VeiculoService {
         }
 
         if (veiculoRepository.existsByPlaca(placaLimpa)) {
-            throw new BusinessException("Placa já cadastrada.");
+            throw new BusinessException("Placa " + placaLimpa + " já cadastrada");
         }
 
         return placaLimpa;

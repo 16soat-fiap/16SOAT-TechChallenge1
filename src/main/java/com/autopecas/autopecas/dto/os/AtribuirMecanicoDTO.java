@@ -1,11 +1,8 @@
 package com.autopecas.autopecas.dto.os;
-
-import jakarta.validation.constraints.NotBlank;
-
+import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
-
 public record AtribuirMecanicoDTO(
-        @NotBlank(message = "Mecânico é obrigatório")
+        @NotNull(message = "Mecânico é obrigatório")
         UUID mecanicoId
 ) {
 }

@@ -23,6 +23,10 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
 
 ## 📂 Estrutura do Projeto
 
+- `src/main/java/com/autopecas/autopecas/controller`: endpoints REST
+- `src/main/java/com/autopecas/autopecas/service`: regras de aplicação e casos de uso
+- `src/main/java/com/autopecas/autopecas/domain`: entidades, enums e objetos de valor do domínio
+- `src/test/java`: suíte de testes unitários e de controller/service
 
 ## 🚀 Como Executar
 
@@ -37,7 +41,7 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
 1.  **Clonar o repositório:**
     ```bash
     git clone <repository-url>
-    cd TechChallenge
+    cd 16SOAT-TechChallenge1
     ```
 
 2. **Configurar o Banco de Dados (via Docker):**
@@ -52,10 +56,44 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
 
 ## 🧪 Testes
 
-Para executar os testes unitários e de integração:
+Para executar apenas os testes:
 ```bash
 ./mvnw test
 ```
+
+Para executar o ciclo completo com empacotamento e geração do relatório de cobertura via JaCoCo:
+```bash
+./mvnw verify
+```
+
+> Observação: o `verify` validado neste projeto utiliza a infraestrutura disponível no `docker-compose.yml` e um teste de contexto sobe a aplicação com o profile `dev`.
+
+## 📊 Cobertura de Testes com JaCoCo
+
+O `JaCoCo` está configurado no `pom.xml` para:
+
+- instrumentar a suíte durante os testes (`prepare-agent`)
+- gerar o relatório no ciclo `verify` (`report`)
+- publicar saídas em HTML, XML e CSV
+
+Arquivos gerados após `./mvnw verify`:
+
+- `target/site/jacoco/index.html`
+- `target/site/jacoco/jacoco.xml`
+- `target/site/jacoco/jacoco.csv`
+
+### Cobertura real validada
+
+Cobertura extraída de uma execução real de `./mvnw verify` em `2026-06-21`, com `BUILD SUCCESS` e `310` testes executados.
+
+| Pacote | Instruções | Branches | Linhas | Métodos |
+| --- | ---: | ---: | ---: | ---: |
+| `com.autopecas.autopecas.controller` | 83,74% | 66,67% | 86,79% | 84,09% |
+| `com.autopecas.autopecas.service` | 91,73% | 73,19% | 95,79% | 83,84% |
+| `com.autopecas.autopecas.domain.entity` | 100,00% | 100,00% | 100,00% | 100,00% |
+| `com.autopecas.autopecas.domain.enums` | 100,00% | 100,00%* | 100,00% | 100,00% |
+
+\* Para `domain.enums`, o relatório não registra desvios condicionais; por isso o total de branches é `0/0` e o JaCoCo o apresenta como 100%.
 
 ---
 Desenvolvido como parte do Tech Challenge da FIAP.

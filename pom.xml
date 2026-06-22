@@ -29,6 +29,7 @@
 	<properties>
 		<java.version>21</java.version>
 		<mapstruct.version>1.5.5.Final</mapstruct.version>
+        <jacoco.version>0.8.12</jacoco.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -96,6 +97,16 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 	<build>
@@ -122,7 +133,73 @@
 					</annotationProcessorPaths>
 				</configuration>
 			</plugin>
-		</plugins>
-	</build>
-
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <dataFile>${project.build.directory}/jacoco.exec</dataFile>
+                    <outputDirectory>${project.reporting.outputDirectory}/jacoco</outputDirectory>
+                    <formats>
+                        <format>HTML</format>
+                        <format>XML</format>
+                        <format>CSV</format>
+                    </formats>
+                    <excludes>
+                        <!-- Classe principal do Spring Boot, sem lógica própria -->
+                        <exclude>**/AutopecasApplication.class</exclude>
+                        <!-- DTOs (records): sem lógica de negócio, cobertura trivial/automática -->
+                        <exclude>**/dto/**</exclude>
+                        <!-- Mappers MapStruct: a implementação é gerada em build-time -->
+                        <exclude>**/mapper/**Mapper.class</exclude>
+                        <exclude>**/mapper/**MapperImpl.class</exclude>
+                        <!-- Enums e Value Objects simples, sem lógica condicional relevante -->
+                        <exclude>**/domain/enums/**</exclude>
+                        <!-- Configuração de infraestrutura (beans declarativos) -->
+                        <exclude>**/config/**</exclude>
+                        <!-- Exceptions simples (sem lógica, apenas construtores) -->
+                        <exclude>**/exception/BusinessException.class</exclude>
+                        <exclude>**/exception/ResourceNotFoundException.class</exclude>
+                        <exclude>**/exception/EstoqueInsuficienteException.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 </project>

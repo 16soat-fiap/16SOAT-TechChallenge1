@@ -4,6 +4,8 @@ import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.ClientePF;
 import com.autopecas.autopecas.domain.entity.ClientePJ;
 import com.autopecas.autopecas.domain.enums.Genero;
+import com.autopecas.autopecas.domain.valueobject.CNPJ;
+import com.autopecas.autopecas.domain.valueobject.CPF;
 import com.autopecas.autopecas.domain.valueobject.Endereco;
 
 import java.time.LocalDate;
@@ -27,7 +29,7 @@ public class ClienteBuilder {
                         .cidade("Sao Paulo")
                         .uf("SP")
                         .build())
-                .cpf("52998224725")
+                .cpf(new CPF("52998224725"))
                 .dataNascimento(LocalDate.of(1990, 1, 1))
                 .rg("123456789")
                 .genero(Genero.MASCULINO)
@@ -50,7 +52,7 @@ public class ClienteBuilder {
                         .cidade("Sao Paulo")
                         .uf("SP")
                         .build())
-                .cnpj("12345678000195")
+                .cnpj(new CNPJ("12345678000195"))
                 .razaoSocial("Empresa Teste LTDA")
                 .inscricaoEstadual("ISENTA");
     }

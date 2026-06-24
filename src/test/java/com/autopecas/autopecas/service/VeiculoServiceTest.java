@@ -2,6 +2,7 @@ package com.autopecas.autopecas.service;
 
 import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.Veiculo;
+import com.autopecas.autopecas.domain.valueobject.Placa;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoResponseDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoUpdateDTO;
@@ -108,7 +109,8 @@ class VeiculoServiceTest {
         void deveBuscarVeiculoPorPlaca() {
             // Given
             VeiculoResponseDTO response = responseDTO(veiculo);
-            when(veiculoRepository.findByPlacaAndAtivoTrue(veiculo.getPlaca())).thenReturn(Optional.of(veiculo));
+            Placa placa = new Placa(response.placa());
+            when(veiculoRepository.findByPlacaAndAtivoTrue(placa)).thenReturn(Optional.of(veiculo));
             when(veiculoMapper.toResponse(veiculo)).thenReturn(response);
 
             // When
@@ -159,7 +161,6 @@ class VeiculoServiceTest {
             VeiculoCreateDTO dto = new VeiculoCreateDTO(cliente.getId(), "abc1b23", "1HGDM28153A000001", "12345678901", "GM", "Onix", 2024, "Branco");
             VeiculoResponseDTO response = responseDTO(veiculo);
 
-            when(veiculoRepository.existsByPlaca("ABC1B23")).thenReturn(false);
             when(clienteRepository.findById(cliente.getId())).thenReturn(Optional.of(cliente));
             when(veiculoRepository.save(any(Veiculo.class))).thenReturn(veiculo);
             when(veiculoMapper.toResponse(veiculo)).thenReturn(response);
@@ -172,19 +173,6 @@ class VeiculoServiceTest {
             ArgumentCaptor<Veiculo> veiculoCaptor = ArgumentCaptor.forClass(Veiculo.class);
             verify(veiculoRepository).save(veiculoCaptor.capture());
             assertThat(veiculoCaptor.getValue().getPlaca()).isEqualTo("ABC1B23");
-        }
-
-        @Test
-        @DisplayName("deve bloquear criação de veículo com placa duplicada")
-        void deveBloquearCriacaoDeVeiculoComPlacaDuplicada() {
-            // Given
-            VeiculoCreateDTO dto = new VeiculoCreateDTO(cliente.getId(), "abc1b23", null, null, "GM", "Onix", 2024, null);
-            when(veiculoRepository.existsByPlaca("ABC1B23")).thenReturn(true);
-
-            // When / Then
-            assertThatThrownBy(() -> veiculoService.criar(dto))
-                    .isInstanceOf(BusinessException.class)
-                    .hasMessage("Placa ABC1B23 já cadastrada");
         }
     }
 

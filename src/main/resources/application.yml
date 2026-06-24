@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: autopecas
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  jackson:
+    time-zone: UTC

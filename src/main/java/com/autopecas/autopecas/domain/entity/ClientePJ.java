@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.domain.entity;
 
 import com.autopecas.autopecas.domain.enums.TipoCliente;
+import com.autopecas.autopecas.domain.valueobject.CNPJ;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -25,14 +26,12 @@ import lombok.experimental.SuperBuilder;
 @ToString(callSuper = true)
 public class ClientePJ extends Cliente {
 
+    @Embedded
     @Column(name = "cnpj", nullable = false, updatable = false)
-    private String cnpj;
+    private CNPJ cnpj;
 
     @Column(name = "razao_social", nullable = false)
     private String razaoSocial;
-
-    @Column(name = "telefone")
-    private String telefone;
 
     // Mantive como string, pois pode ser ISENTO
     @Column(name = "inscricao_estadual")
@@ -48,7 +47,7 @@ public class ClientePJ extends Cliente {
 
     @Override
     public String getDocumento() {
-        return cnpj;
+        return cnpj.getValor();
     }
 
     @Override

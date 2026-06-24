@@ -4,6 +4,8 @@ import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.ClientePF;
 import com.autopecas.autopecas.domain.entity.ClientePJ;
 import com.autopecas.autopecas.domain.enums.Genero;
+import com.autopecas.autopecas.domain.valueobject.CNPJ;
+import com.autopecas.autopecas.domain.valueobject.CPF;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePJDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteResponseDTO;
@@ -14,13 +16,13 @@ import com.autopecas.autopecas.mapper.ClienteMapper;
 import com.autopecas.autopecas.repository.ClientePFRepository;
 import com.autopecas.autopecas.repository.ClientePJRepository;
 import com.autopecas.autopecas.repository.ClienteRepository;
-import com.autopecas.autopecas.utils.DocumentValidator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -48,21 +50,23 @@ public class ClienteService {
 
     @Transactional(readOnly = true)
     public ClienteResponseDTO buscarPorDocumento(String documento){
-        // busca por cpf ou cnpj
-        Cliente cliente = clientePFRepository.findByCpf(documento)
-                .map(c -> (Cliente) c)
-                .or(() -> clientePJRepository.findByCnpj(documento)
-                .map(c -> (Cliente) c))
-                .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado, documento: " + documento));
+        Cliente cliente =  switch (documento.length()) {
+            case 11 -> clientePFRepository.findByCpf(new CPF(documento))
+                    .map(c -> (Cliente) c).orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
+            case 14 -> clientePJRepository.findByCnpj(new CNPJ(documento))
+                    .map(c -> (Cliente) c).orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado"));
+            default -> throw new BusinessException(
+                    "Documento inválido: esperado CPF (11 dígitos) ou CNPJ (14 dígitos)");
+        };
+
         return clienteMapper.toResponse(cliente);
     }
 
     @Transactional
     public ClienteResponseDTO criarPF(ClienteCreatePFDTO dto){
-        if (!DocumentValidator.validarCPF(dto.cpf())){
-            throw new BusinessException("CPF inválido");
-        }
-        if (clientePFRepository.existsByCpf(dto.cpf())){
+        CPF cpf = new CPF(dto.cpf());
+
+        if (clientePFRepository.existsByCpf(cpf)){
             throw new BusinessException("CPF já cadastrado: " + dto.cpf());
         }
 
@@ -80,7 +84,7 @@ public class ClienteService {
                 .email(dto.email())
                 .telefone(dto.telefone())
                 .aceitaNotificacoes(dto.aceitaNotificacoes())
-                .cpf(dto.cpf())
+                .cpf(cpf)
                 .dataNascimento(dto.dataNascimento())
                 .rg(dto.rg())
                 .genero(genero)
@@ -94,10 +98,9 @@ public class ClienteService {
 
     @Transactional
     public ClienteResponseDTO criarPJ(ClienteCreatePJDTO dto){
-        if (!DocumentValidator.validarCNPJ(dto.cnpj())){
-            throw new BusinessException("CNPJ inválido");
-        }
-        if (clientePJRepository.existsByCnpj(dto.cnpj())){
+        CNPJ cnpj = new CNPJ(dto.cnpj());
+
+        if (clientePJRepository.existsByCnpj(cnpj)){
             throw new BusinessException("CNPJ já cadastrado: " + dto.cnpj());
         }
 
@@ -106,7 +109,7 @@ public class ClienteService {
                 .email(dto.email())
                 .telefone(dto.telefone())
                 .aceitaNotificacoes(dto.aceitaNotificacoes())
-                .cnpj(dto.cnpj())
+                .cnpj(cnpj)
                 .razaoSocial(dto.razaoSocial())
                 .inscricaoEstadual(dto.inscricaoEstadual())
                 .build();

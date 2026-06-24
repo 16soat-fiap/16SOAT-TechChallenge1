@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.domain.entity;
 
 import com.autopecas.autopecas.domain.enums.TipoCliente;
+import com.autopecas.autopecas.domain.valueobject.CNPJ;
 import com.autopecas.autopecas.domain.valueobject.Endereco;
 import com.autopecas.autopecas.util.test.ClienteBuilder;
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +35,7 @@ class ClientePJTest {
             assertThat(clientePJ.getAtivo()).isTrue();
             assertThat(clientePJ.getEndereco()).isNotNull();
             assertThat(clientePJ.getEndereco().getCep()).isEqualTo("02000-000");
-            assertThat(clientePJ.getCnpj()).isEqualTo("12345678000195");
+            assertThat(clientePJ.getCnpj().getValor()).isEqualTo("12345678000195");
             assertThat(clientePJ.getRazaoSocial()).isEqualTo("Empresa Teste LTDA");
             assertThat(clientePJ.getInscricaoEstadual()).isEqualTo("ISENTA");
             assertThat(clientePJ.getInscricaoMunicipal()).isNull();
@@ -56,7 +57,7 @@ class ClientePJTest {
             Boolean aceitaNotificacoes = false;
             Boolean ativo = false;
             Endereco endereco = Endereco.builder().cep("88888-888").logradouro("Av. Principal").build();
-            String cnpj = "99887766000155";
+            CNPJ cnpj = new CNPJ("14830099000163");
             String razaoSocial = "Nova Empresa S.A.";
             String inscricaoEstadual = "123456789";
             String inscricaoMunicipal = "987654321";
@@ -87,7 +88,7 @@ class ClientePJTest {
             assertThat(clientePJ.getAceitaNotificacoes()).isFalse();
             assertThat(clientePJ.getAtivo()).isFalse();
             assertThat(clientePJ.getEndereco()).isEqualTo(endereco);
-            assertThat(clientePJ.getCnpj()).isEqualTo(cnpj);
+            assertThat(clientePJ.getCnpj().getValor()).isEqualTo(cnpj.getValor());
             assertThat(clientePJ.getRazaoSocial()).isEqualTo(razaoSocial);
             assertThat(clientePJ.getInscricaoEstadual()).isEqualTo(inscricaoEstadual);
             assertThat(clientePJ.getInscricaoMunicipal()).isEqualTo(inscricaoMunicipal);
@@ -103,14 +104,14 @@ class ClientePJTest {
         @DisplayName("getDocumento deve retornar o CNPJ")
         void getDocumentoDeveRetornarCNPJ() {
             // Given
-            String cnpjEsperado = "11223344000155";
+            CNPJ cnpjEsperado = new CNPJ("01330542000195");
             ClientePJ clientePJ = ClienteBuilder.clientePJ().cnpj(cnpjEsperado).build();
 
             // When
             String documento = clientePJ.getDocumento();
 
             // Then
-            assertThat(documento).isEqualTo(cnpjEsperado);
+            assertThat(documento).isEqualTo(cnpjEsperado.getValor());
         }
 
         @Test
@@ -136,8 +137,8 @@ class ClientePJTest {
         void deveRetornarTrueParaObjetosClientePJComMesmoID() {
             // Given
             UUID id = UUID.randomUUID();
-            ClientePJ clientePJ1 = ClienteBuilder.clientePJ().id(id).cnpj("123").build();
-            ClientePJ clientePJ2 = ClienteBuilder.clientePJ().id(id).cnpj("456").build(); // CNPJ diferente, mas ID igual
+            ClientePJ clientePJ1 = ClienteBuilder.clientePJ().id(id).cnpj(new CNPJ("24698442000111")).build();
+            ClientePJ clientePJ2 = ClienteBuilder.clientePJ().id(id).cnpj(new CNPJ("58942500000122")).build(); // CNPJ diferente, mas ID igual
 
             // Then
             assertThat(clientePJ1).isEqualTo(clientePJ2);
@@ -148,8 +149,8 @@ class ClientePJTest {
         @DisplayName("deve retornar false para objetos ClientePJ com IDs diferentes")
         void deveRetornarFalseParaObjetosClientePJComIDsDiferentes() {
             // Given
-            ClientePJ clientePJ1 = ClienteBuilder.clientePJ().id(UUID.randomUUID()).cnpj("123").build();
-            ClientePJ clientePJ2 = ClienteBuilder.clientePJ().id(UUID.randomUUID()).cnpj("123").build();
+            ClientePJ clientePJ1 = ClienteBuilder.clientePJ().id(UUID.randomUUID()).cnpj(new CNPJ("24698442000111")).build();
+            ClientePJ clientePJ2 = ClienteBuilder.clientePJ().id(UUID.randomUUID()).cnpj(new CNPJ("24698442000111")).build();
 
             // Then
             assertThat(clientePJ1).isNotEqualTo(clientePJ2);

@@ -2,6 +2,7 @@ package com.autopecas.autopecas.service;
 
 import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.Veiculo;
+import com.autopecas.autopecas.domain.valueobject.Placa;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoResponseDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoUpdateDTO;
@@ -45,8 +46,7 @@ public class VeiculoService {
 
     @Transactional(readOnly = true)
     public VeiculoResponseDTO buscarPorPlaca(String placa) {
-        String placaFormatada = formatarPlaca(placa);
-        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(placaFormatada)
+        Veiculo veiculo = veiculoRepository.findByPlacaAndAtivoTrue(new Placa(placa))
                 .orElseThrow(() -> new ResourceNotFoundException("Placa " + placa + " Não encontrada"));
         return veiculoMapper.toResponse(veiculo);
     }
@@ -65,13 +65,11 @@ public class VeiculoService {
     @Transactional
     public VeiculoResponseDTO criar(VeiculoCreateDTO dto) {
 
-        String placaFormatada  = validarPlaca(dto.placa());
-
         Cliente cliente = clienteRepository.findById(dto.clienteId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cliente não encontrado, id: " + dto.clienteId()));
 
         Veiculo veiculo = Veiculo.builder()
-                .placa(placaFormatada)
+                .placa(new Placa(dto.placa()))
                 .chassi(dto.chassi())
                 .renavam(dto.renavam())
                 .marca(dto.marca())
@@ -118,31 +116,6 @@ public class VeiculoService {
         Veiculo atualizado = veiculoRepository.save(veiculo);
         log.info("Veículo atualizado. ID: {}, Placa: {}", atualizado.getId(), atualizado.getPlaca());
         return veiculoMapper.toResponse(atualizado);
-    }
-
-    private String validarPlaca(String placa) {
-        if (placa == null || placa.trim().isEmpty()) {
-            throw new BusinessException("A placa não pode estar vazia.");
-        }
-
-        String placaLimpa = formatarPlaca(placa);
-
-        String placaAntiga = "^[A-Z]{3}[0-9]{4}$";
-        String placaMercosul = "^[A-Z]{3}[0-9][A-Z][0-9]{2}$";
-
-        if (!placaLimpa.matches(placaAntiga) && !placaLimpa.matches(placaMercosul)) {
-            throw new BusinessException("Placa de veículo com formato inválido.");
-        }
-
-        if (veiculoRepository.existsByPlaca(placaLimpa)) {
-            throw new BusinessException("Placa " + placaLimpa + " já cadastrada");
-        }
-
-        return placaLimpa;
-    }
-
-    private String formatarPlaca(String placa){
-        return placa.replace("-", "").trim().toUpperCase();
     }
 
     private void validarRenavamDuplicado(String renavam, UUID id) {

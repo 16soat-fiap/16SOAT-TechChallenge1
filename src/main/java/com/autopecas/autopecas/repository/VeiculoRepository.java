@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.repository;
 
 import com.autopecas.autopecas.domain.entity.Veiculo;
+import com.autopecas.autopecas.domain.valueobject.Placa;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -12,9 +13,10 @@ import java.util.UUID;
 public interface VeiculoRepository extends JpaRepository<Veiculo, UUID> {
     List<Veiculo> findAllByAtivoTrue();
     Optional<Veiculo> findByIdAndAtivoTrue(UUID id);
-    Optional<Veiculo> findByPlacaAndAtivoTrue(String placa);
+    Optional<Veiculo> findByPlaca(Placa placa);
+    Optional<Veiculo> findByPlacaAndAtivoTrue(Placa placa);
     List<Veiculo> findByClienteIdAndAtivoTrue(UUID clienteId);
-    boolean existsByPlaca(String placa);
+    boolean existsByPlaca(Placa placa);
     boolean existsByChassi(String chassi);
     boolean existsByRenavam(String renavam);
     Optional<Veiculo> findByChassi(String chassi);

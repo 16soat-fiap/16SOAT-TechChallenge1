@@ -77,19 +77,19 @@ class ClienteControllerTest {
         void getApiClientesBuscarDocDeveBuscarPorDocumento() throws Exception {
             // Given
             ClienteResponseDTO response = responseDTO();
-            when(clienteService.buscarPorDocumento("12345678901")).thenReturn(response);
+            when(clienteService.buscarPorDocumento("99049462057")).thenReturn(response);
 
             // When / Then
-            mockMvc.perform(get("/api/clientes/buscarDOC").param("documento", "12345678901"))
+            mockMvc.perform(get("/api/clientes/buscarDOC").param("documento", "99049462057"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.cpf").value(response.cpf()));
+                    .andExpect(jsonPath("$.documento").value(response.documento()));
         }
 
         @Test
         @DisplayName("POST /api/clientes/pf deve criar PF")
         void postApiClientesPfDeveCriarPf() throws Exception {
             // Given
-            ClienteCreatePFDTO request = new ClienteCreatePFDTO("Cliente PF", "pf@teste.com", "11999999999", true, "12345678901", LocalDate.of(1990, 1, 1), "RG", "MASCULINO");
+            ClienteCreatePFDTO request = new ClienteCreatePFDTO("Cliente PF", "pf@teste.com", "11999999999", true, "99049462057", LocalDate.of(1990, 1, 1), "RG", "MASCULINO");
             ClienteResponseDTO response = responseDTO();
             when(clienteService.criarPF(request)).thenReturn(response);
 
@@ -102,7 +102,7 @@ class ClienteControllerTest {
                                       \"email\": \"pf@teste.com\",
                                       \"telefone\": \"11999999999\",
                                       \"aceitaNotificacoes\": true,
-                                      \"cpf\": \"12345678901\",
+                                      \"cpf\": \"99049462057\",
                                       \"dataNascimento\": \"1990-01-01\",
                                       \"rg\": \"RG\",
                                       \"genero\": \"MASCULINO\"
@@ -189,6 +189,6 @@ class ClienteControllerTest {
     }
 
     private ClienteResponseDTO responseDTO() {
-        return new ClienteResponseDTO(UUID.randomUUID(), "Cliente Teste", "12345678901", "", "cliente@teste.com", "11999999999");
+        return new ClienteResponseDTO(UUID.randomUUID(), "Cliente Teste", "99049462057", "cliente@teste.com", "11999999999");
     }
 }

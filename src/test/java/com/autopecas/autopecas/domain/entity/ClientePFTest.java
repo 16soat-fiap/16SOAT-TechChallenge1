@@ -2,6 +2,7 @@ package com.autopecas.autopecas.domain.entity;
 
 import com.autopecas.autopecas.domain.enums.Genero;
 import com.autopecas.autopecas.domain.enums.TipoCliente;
+import com.autopecas.autopecas.domain.valueobject.CPF;
 import com.autopecas.autopecas.domain.valueobject.Endereco;
 import com.autopecas.autopecas.util.test.ClienteBuilder;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +38,7 @@ class ClientePFTest {
             assertThat(clientePF.getAtivo()).isTrue();
             assertThat(clientePF.getEndereco()).isNotNull();
             assertThat(clientePF.getEndereco().getCep()).isEqualTo("01000-000");
-            assertThat(clientePF.getCpf()).isEqualTo("52998224725");
+            assertThat(clientePF.getCpf().getValor()).isEqualTo("52998224725");
             assertThat(clientePF.getDataNascimento()).isEqualTo(LocalDate.of(1990, 1, 1));
             assertThat(clientePF.getRg()).isEqualTo("123456789");
             assertThat(clientePF.getGenero()).isEqualTo(Genero.MASCULINO);
@@ -59,7 +60,7 @@ class ClientePFTest {
             Boolean aceitaNotificacoes = false;
             Boolean ativo = false;
             Endereco endereco = Endereco.builder().cep("99999-999").logradouro("Rua Nova").build();
-            String cpf = "98765432109";
+            CPF cpf = new CPF("23395216020");
             LocalDate dataNascimento = LocalDate.of(1985, 5, 10);
             String rg = "987654321";
             Genero genero = Genero.FEMININO;
@@ -106,14 +107,14 @@ class ClientePFTest {
         @DisplayName("getDocumento deve retornar o CPF")
         void getDocumentoDeveRetornarCPF() {
             // Given
-            String cpfEsperado = "11122233344";
+            CPF cpfEsperado = new CPF("06635258027");
             ClientePF clientePF = ClienteBuilder.clientePF().cpf(cpfEsperado).build();
 
             // When
             String documento = clientePF.getDocumento();
 
             // Then
-            assertThat(documento).isEqualTo(cpfEsperado);
+            assertThat(documento).isEqualTo(cpfEsperado.getValor());
         }
 
         @Test
@@ -139,8 +140,8 @@ class ClientePFTest {
         void deveRetornarTrueParaObjetosClientePFComMesmoID() {
             // Given
             UUID id = UUID.randomUUID();
-            ClientePF clientePF1 = ClienteBuilder.clientePF().id(id).cpf("123").build();
-            ClientePF clientePF2 = ClienteBuilder.clientePF().id(id).cpf("456").build(); // CPF diferente, mas ID igual
+            ClientePF clientePF1 = ClienteBuilder.clientePF().id(id).cpf(new CPF("78481006009")).build();
+            ClientePF clientePF2 = ClienteBuilder.clientePF().id(id).cpf(new CPF("83488883060")).build(); // CPF diferente, mas ID igual
 
             // Then
             assertThat(clientePF1).isEqualTo(clientePF2);
@@ -151,8 +152,8 @@ class ClientePFTest {
         @DisplayName("deve retornar false para objetos ClientePF com IDs diferentes")
         void deveRetornarFalseParaObjetosClientePFComIDsDiferentes() {
             // Given
-            ClientePF clientePF1 = ClienteBuilder.clientePF().id(UUID.randomUUID()).cpf("123").build();
-            ClientePF clientePF2 = ClienteBuilder.clientePF().id(UUID.randomUUID()).cpf("123").build();
+            ClientePF clientePF1 = ClienteBuilder.clientePF().id(UUID.randomUUID()).cpf(new CPF("78481006009")).build();
+            ClientePF clientePF2 = ClienteBuilder.clientePF().id(UUID.randomUUID()).cpf(new CPF("78481006009")).build();
 
             // Then
             assertThat(clientePF1).isNotEqualTo(clientePF2);

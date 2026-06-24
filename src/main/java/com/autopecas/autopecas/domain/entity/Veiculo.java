@@ -1,5 +1,6 @@
 package com.autopecas.autopecas.domain.entity;
 
+import com.autopecas.autopecas.domain.valueobject.Placa;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -44,8 +45,9 @@ public class Veiculo {
     private UUID id;
 
     /** Placa normalizada (sem hífen, maiúsculas). Aceita formato antigo (ABC1234) ou Mercosul (ABC1D23). */
+    @Embedded
     @Column(name = "placa", nullable = false, length = 7)
-    private String placa;
+    private Placa placa;
 
     /** Número do chassi (VIN). 17 caracteres alfanuméricos sem I, O, Q. */
     @Column(name = "chassi", length = 17)
@@ -93,4 +95,8 @@ public class Veiculo {
     @OneToMany(mappedBy = "veiculo", fetch = FetchType.LAZY)
     @Builder.Default
     private List<OrdemServico> ordensServico = new ArrayList<>();
+
+    public String getPlaca() {
+        return placa.getValor();
+    }
 }

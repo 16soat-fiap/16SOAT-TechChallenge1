@@ -1,5 +1,6 @@
 package com.autopecas.autopecas.domain.entity;
 
+import com.autopecas.autopecas.domain.valueobject.Placa;
 import com.autopecas.autopecas.util.test.ClienteBuilder;
 import com.autopecas.autopecas.util.test.VeiculoBuilder;
 import org.junit.jupiter.api.DisplayName;
@@ -61,7 +62,7 @@ class VeiculoTest {
             // When
             Veiculo veiculo = Veiculo.builder()
                     .id(id)
-                    .placa(placa)
+                    .placa(new Placa(placa))
                     .chassi(chassi)
                     .renavam(renavam)
                     .marca(marca)
@@ -99,8 +100,8 @@ class VeiculoTest {
             // Given
             UUID id = UUID.randomUUID();
             Cliente cliente = ClienteBuilder.clientePF().build();
-            Veiculo veiculo1 = VeiculoBuilder.veiculo(cliente).id(id).placa("AAA1111").build();
-            Veiculo veiculo2 = VeiculoBuilder.veiculo(cliente).id(id).placa("BBB2222").build(); // Placa diferente, mas ID igual
+            Veiculo veiculo1 = VeiculoBuilder.veiculo(cliente).id(id).placa(new Placa("AAA1111")).build();
+            Veiculo veiculo2 = VeiculoBuilder.veiculo(cliente).id(id).placa(new Placa("BBB2222")).build(); // Placa diferente, mas ID igual
 
             // Then
             assertThat(veiculo1).isEqualTo(veiculo2);
@@ -112,8 +113,8 @@ class VeiculoTest {
         void deveRetornarFalseParaObjetosVeiculoComIDsDiferentes() {
             // Given
             Cliente cliente = ClienteBuilder.clientePF().build();
-            Veiculo veiculo1 = VeiculoBuilder.veiculo(cliente).id(UUID.randomUUID()).placa("AAA1111").build();
-            Veiculo veiculo2 = VeiculoBuilder.veiculo(cliente).id(UUID.randomUUID()).placa("AAA1111").build();
+            Veiculo veiculo1 = VeiculoBuilder.veiculo(cliente).id(UUID.randomUUID()).placa(new Placa("AAA1111")).build();
+            Veiculo veiculo2 = VeiculoBuilder.veiculo(cliente).id(UUID.randomUUID()).placa(new Placa("AAA1111")).build();
 
             // Then
             assertThat(veiculo1).isNotEqualTo(veiculo2);

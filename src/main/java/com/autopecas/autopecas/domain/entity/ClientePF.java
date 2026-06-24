@@ -2,6 +2,7 @@ package com.autopecas.autopecas.domain.entity;
 
 import com.autopecas.autopecas.domain.enums.Genero;
 import com.autopecas.autopecas.domain.enums.TipoCliente;
+import com.autopecas.autopecas.domain.valueobject.CPF;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
@@ -26,8 +27,9 @@ import java.time.LocalDate;
 @ToString(callSuper = true)
 public class ClientePF extends Cliente {
 
+    @Embedded
     @Column(name = "cpf", nullable = false, updatable = false)
-    private String cpf;
+    private CPF cpf;
 
     @Column(name = "data_nascimento")
     private LocalDate dataNascimento;
@@ -45,7 +47,7 @@ public class ClientePF extends Cliente {
 
     @Override
     public String getDocumento() {
-        return cpf;
+        return cpf.getValor();
     }
 
     @Override

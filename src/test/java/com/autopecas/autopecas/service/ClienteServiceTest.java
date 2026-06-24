@@ -3,6 +3,8 @@ package com.autopecas.autopecas.service;
 import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.ClientePF;
 import com.autopecas.autopecas.domain.entity.ClientePJ;
+import com.autopecas.autopecas.domain.valueobject.CNPJ;
+import com.autopecas.autopecas.domain.valueobject.CPF;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePJDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteResponseDTO;
@@ -117,7 +119,7 @@ class ClienteServiceTest {
             when(clienteMapper.toResponse((Cliente) clientePF)).thenReturn(response);
 
             // When
-            ClienteResponseDTO resultado = clienteService.buscarPorDocumento(clientePF.getCpf());
+            ClienteResponseDTO resultado = clienteService.buscarPorDocumento(clientePF.getCpf().getValor());
 
             // Then
             assertThat(resultado).isEqualTo(response);
@@ -128,12 +130,12 @@ class ClienteServiceTest {
         void deveBuscarClientePorCnpj() {
             // Given
             ClienteResponseDTO response = responseDTO(clientePJ);
-            when(clientePFRepository.findByCpf(clientePJ.getCnpj())).thenReturn(Optional.empty());
+//            when(clientePFRepository.findByCpf(clientePJ.getCnpj())).thenReturn(Optional.empty());
             when(clientePJRepository.findByCnpj(clientePJ.getCnpj())).thenReturn(Optional.of(clientePJ));
             when(clienteMapper.toResponse((Cliente) clientePJ)).thenReturn(response);
 
             // When
-            ClienteResponseDTO resultado = clienteService.buscarPorDocumento(clientePJ.getCnpj());
+            ClienteResponseDTO resultado = clienteService.buscarPorDocumento(clientePJ.getDocumento());
 
             // Then
             assertThat(resultado).isEqualTo(response);
@@ -158,9 +160,10 @@ class ClienteServiceTest {
                     "RG123",
                     "MASCULINO"
             );
-            ClienteResponseDTO response = new ClienteResponseDTO(clientePF.getId(), "Cliente Novo", dto.cpf(), "", dto.email(), dto.telefone());
+            ClienteResponseDTO response = new ClienteResponseDTO(clientePF.getId(), "Cliente Novo", dto.cpf(), dto.email(), dto.telefone());
+            CPF cpf = new CPF(dto.cpf());
 
-            when(clientePFRepository.existsByCpf(dto.cpf())).thenReturn(false);
+            when(clientePFRepository.existsByCpf(cpf)).thenReturn(false);
             when(clientePFRepository.save(any(ClientePF.class))).thenReturn(clientePF);
             when(clienteMapper.toResponse(clientePF)).thenReturn(response);
 
@@ -172,7 +175,7 @@ class ClienteServiceTest {
             ArgumentCaptor<ClientePF> clienteCaptor = ArgumentCaptor.forClass(ClientePF.class);
             verify(clientePFRepository).save(clienteCaptor.capture());
             assertThat(clienteCaptor.getValue().getNome()).isEqualTo("Cliente Novo");
-            assertThat(clienteCaptor.getValue().getCpf()).isEqualTo("52998224725");
+            assertThat(clienteCaptor.getValue().getCpf().getValor()).isEqualTo("52998224725");
         }
 
         @Test
@@ -180,7 +183,7 @@ class ClienteServiceTest {
         void deveBloquearCriacaoDeClientePfComCpfDuplicado() {
             // Given
             ClienteCreatePFDTO dto = new ClienteCreatePFDTO("Cliente", null, null, true, "52998224725", null, null, null);
-            when(clientePFRepository.existsByCpf(dto.cpf())).thenReturn(true);
+            when(clientePFRepository.existsByCpf(new CPF(dto.cpf()))).thenReturn(true);
 
             // When / Then
             assertThatThrownBy(() -> clienteService.criarPF(dto))
@@ -201,9 +204,10 @@ class ClienteServiceTest {
                     "Empresa Nova LTDA",
                     "12345"
             );
-            ClienteResponseDTO response = new ClienteResponseDTO(clientePJ.getId(), dto.nome(), "", dto.cnpj(), dto.email(), dto.telefone());
+            ClienteResponseDTO response = new ClienteResponseDTO(clientePJ.getId(), dto.nome(), dto.cnpj(), dto.email(), dto.telefone());
+            CNPJ cnpj = new CNPJ(dto.cnpj());
 
-            when(clientePJRepository.existsByCnpj(dto.cnpj())).thenReturn(false);
+            when(clientePJRepository.existsByCnpj(cnpj)).thenReturn(false);
             when(clientePJRepository.save(any(ClientePJ.class))).thenReturn(clientePJ);
             when(clienteMapper.toResponse(clientePJ)).thenReturn(response);
 
@@ -219,7 +223,9 @@ class ClienteServiceTest {
         void deveBloquearCriacaoDeClientePjComCnpjDuplicado() {
             // Given
             ClienteCreatePJDTO dto = new ClienteCreatePJDTO("Empresa", null, null, true, "12345678000195", "Empresa", null);
-            when(clientePJRepository.existsByCnpj(dto.cnpj())).thenReturn(true);
+            CNPJ cnpj = new CNPJ(dto.cnpj());
+
+            when(clientePJRepository.existsByCnpj(cnpj)).thenReturn(true);
 
             // When / Then
             assertThatThrownBy(() -> clienteService.criarPJ(dto))
@@ -237,7 +243,7 @@ class ClienteServiceTest {
         void deveAtualizarCliente() {
             // Given
             ClienteUpdateDTO dto = new ClienteUpdateDTO("Nome Atualizado", "atualizado@teste.com", "11888888888", false);
-            ClienteResponseDTO response = new ClienteResponseDTO(clientePF.getId(), dto.nome(), clientePF.getCpf(), "", dto.email(), dto.telefone());
+            ClienteResponseDTO response = new ClienteResponseDTO(clientePF.getId(), dto.nome(), clientePF.getCpf().toString(), dto.email(), dto.telefone());
 
             when(clienteRepository.findById(clientePF.getId())).thenReturn(Optional.of(clientePF));
             when(clienteRepository.save(clientePF)).thenReturn(clientePF);
@@ -297,15 +303,7 @@ class ClienteServiceTest {
     }
 
     private ClienteResponseDTO responseDTO(Cliente cliente) {
-        String cpf = null;
-        String cnpj = null;
 
-        if (cliente instanceof ClientePF) {
-            cpf = ((ClientePF) cliente).getCpf();
-        } else if (cliente instanceof ClientePJ) {
-            cnpj = ((ClientePJ) cliente).getCnpj();
-        }
-
-        return new ClienteResponseDTO(cliente.getId(), cliente.getNome(), cpf, cnpj, cliente.getEmail(), cliente.getTelefone());
+        return new ClienteResponseDTO(cliente.getId(), cliente.getNome(), cliente.getDocumento(), cliente.getEmail(), cliente.getTelefone());
     }
 }

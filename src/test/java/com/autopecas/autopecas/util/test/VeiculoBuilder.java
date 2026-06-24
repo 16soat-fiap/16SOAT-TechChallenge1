@@ -2,6 +2,7 @@ package com.autopecas.autopecas.util.test;
 
 import com.autopecas.autopecas.domain.entity.Cliente;
 import com.autopecas.autopecas.domain.entity.Veiculo;
+import com.autopecas.autopecas.domain.valueobject.Placa;
 
 import java.util.UUID;
 
@@ -10,7 +11,7 @@ public class VeiculoBuilder {
     public static Veiculo.VeiculoBuilder veiculo(Cliente cliente) {
         return Veiculo.builder()
                 .id(UUID.randomUUID())
-                .placa("ABC1B23")
+                .placa(new Placa("ABC1B23"))
                 .chassi("1HGDM28153A000001")
                 .renavam("12345678901")
                 .marca("Chevrolet")

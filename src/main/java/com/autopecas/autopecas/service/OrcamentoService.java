@@ -96,10 +96,10 @@ public class OrcamentoService {
         }
 
         orcamento.recalcular();
-        ordemServicoRepository.save(os);
+        Orcamento savedOrcamento = orcamentoRepository.save(orcamento);
 
-        log.info("Orçamento criado para OS {}. Versão: {}", osId, orcamento.getVersao());
-        return orcamentoMapper.toResponse(orcamento);
+        log.info("Orçamento criado para OS {}. Versão: {}", osId, savedOrcamento.getVersao());
+        return orcamentoMapper.toResponse(savedOrcamento);
     }
 
     @Transactional

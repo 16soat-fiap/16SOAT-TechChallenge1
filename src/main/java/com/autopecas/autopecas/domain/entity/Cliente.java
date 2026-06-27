@@ -60,6 +60,7 @@ public abstract class Cliente  {
     @Builder.Default
     private Boolean aceitaNotificacoes = true;
 
+    @Builder.Default
     @Column(name = "ativo", nullable = false)
     private Boolean ativo = true;
 

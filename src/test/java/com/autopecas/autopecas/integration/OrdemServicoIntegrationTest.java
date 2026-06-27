@@ -8,7 +8,7 @@ import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
 import com.autopecas.autopecas.dto.os.DiagnosticoDTO;
 import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

@@ -5,7 +5,7 @@ import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
 import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
 import com.autopecas.autopecas.dto.peca.PecaCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -98,11 +98,11 @@ class DashboardIntegrationTest extends IntegrationTestBase {
         void deveRetornarDashboard() throws Exception {
             mockMvc.perform(get(BASE))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.osAbertas").isNumber())
-                    .andExpect(jsonPath("$.osEmExecucao").isNumber())
-                    .andExpect(jsonPath("$.osFinalizadas").isNumber())
-                    .andExpect(jsonPath("$.osEntregues").isNumber())
-                    .andExpect(jsonPath("$.estoqueBaixo").isNumber());
+                    .andExpect(jsonPath("$.totalOsAbertas").isNumber())
+                    .andExpect(jsonPath("$.totalOsEmExecucao").isNumber())
+                    .andExpect(jsonPath("$.totalOsFinalizadas").isNumber())
+                    .andExpect(jsonPath("$.totalOsEntregues").isNumber())
+                    .andExpect(jsonPath("$.estoqueBaixoCount").isNumber());
         }
 
         @Test
@@ -112,7 +112,7 @@ class DashboardIntegrationTest extends IntegrationTestBase {
             String respAntes = mockMvc.perform(get(BASE))
                     .andExpect(status().isOk())
                     .andReturn().getResponse().getContentAsString();
-            int osAbertasAntes = objectMapper.readTree(respAntes).get("osAbertas").asInt();
+            int osAbertasAntes = objectMapper.readTree(respAntes).get("totalOsAbertas").asInt();
 
             // Cria uma nova OS (status RECEBIDA)
             UUID clienteId = criarCliente();
@@ -122,7 +122,7 @@ class DashboardIntegrationTest extends IntegrationTestBase {
             // Contador deve ter aumentado em pelo menos 1
             mockMvc.perform(get(BASE))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.osAbertas", greaterThanOrEqualTo(osAbertasAntes + 1)));
+                    .andExpect(jsonPath("$.totalOsAbertas", greaterThanOrEqualTo(osAbertasAntes + 1)));
         }
 
         @Test
@@ -138,7 +138,7 @@ class DashboardIntegrationTest extends IntegrationTestBase {
 
             mockMvc.perform(get(BASE))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.estoqueBaixo", greaterThanOrEqualTo(1)));
+                    .andExpect(jsonPath("$.estoqueBaixoCount", greaterThanOrEqualTo(1)));
         }
     }
 

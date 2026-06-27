@@ -3,7 +3,7 @@ package com.autopecas.autopecas.integration;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePJDTO;
 import com.autopecas.autopecas.dto.cliente.ClienteUpdateDTO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;

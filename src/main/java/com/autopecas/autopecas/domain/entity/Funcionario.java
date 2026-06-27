@@ -66,6 +66,7 @@ public abstract class Funcionario {
     @Column(name = "data_nascimento")
     private LocalDate dataNascimento;
 
+    @Builder.Default
     @Column(name = "ativo", nullable = false)
     private Boolean ativo = true;
 

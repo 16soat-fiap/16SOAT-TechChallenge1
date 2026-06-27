@@ -118,7 +118,7 @@ class OrcamentoServiceTest {
             when(orcamentoRepository.existsByOrdemServicoIdAndStatus(ordemServico.getId(), StatusOrcamento.APROVADA)).thenReturn(false);
             when(servicoRepository.findById(servico.getId())).thenReturn(Optional.of(servico));
             when(pecaRepository.findById(peca.getId())).thenReturn(Optional.of(peca));
-            when(ordemServicoRepository.save(ordemServico)).thenReturn(ordemServico);
+            when(orcamentoRepository.save(any(Orcamento.class))).thenAnswer(invocation -> invocation.getArgument(0));
             when(orcamentoMapper.toResponse(any(Orcamento.class))).thenReturn(response);
 
             // When
@@ -140,7 +140,7 @@ class OrcamentoServiceTest {
             assertThat(orcamentoCriado.getValorPecas()).isEqualByComparingTo(new BigDecimal("240.00"));
             assertThat(orcamentoCriado.getValorTotal()).isEqualByComparingTo(new BigDecimal("540.00"));
 
-            verify(ordemServicoRepository).save(ordemServico);
+            verify(orcamentoRepository).save(any(Orcamento.class));
             verify(servicoRepository).findById(servico.getId());
             verify(pecaRepository).findById(peca.getId());
         }
@@ -274,12 +274,11 @@ class OrcamentoServiceTest {
             OrcamentoResponseDTO novoResponse = responseDTO(StatusOrcamento.RASCUNHO, new BigDecimal("150.00"));
 
             when(orcamentoRepository.findById(orcamentoEnviado.getId())).thenReturn(Optional.of(orcamentoEnviado));
-            when(orcamentoRepository.save(orcamentoEnviado)).thenReturn(orcamentoEnviado);
+            when(orcamentoRepository.save(any(Orcamento.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
             when(ordemServicoRepository.findById(ordemServico.getId())).thenReturn(Optional.of(ordemServico));
             when(orcamentoRepository.existsByOrdemServicoIdAndStatus(ordemServico.getId(), StatusOrcamento.APROVADA)).thenReturn(false);
             when(servicoRepository.findById(servico.getId())).thenReturn(Optional.of(servico));
-            when(ordemServicoRepository.save(ordemServico)).thenReturn(ordemServico);
             when(orcamentoMapper.toResponse(any(Orcamento.class))).thenAnswer(invocation -> {
                 Orcamento orcamento = invocation.getArgument(0);
                 return orcamento == orcamentoEnviado ? rejeitadoResponse : novoResponse;

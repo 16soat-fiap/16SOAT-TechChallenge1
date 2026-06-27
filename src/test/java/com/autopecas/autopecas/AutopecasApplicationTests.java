@@ -1,10 +1,9 @@
 package com.autopecas.autopecas;
 
+import com.autopecas.autopecas.integration.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class AutopecasApplicationTests {
+class AutopecasApplicationTests extends IntegrationTestBase {
 
 	@Test
 	void contextLoads() {

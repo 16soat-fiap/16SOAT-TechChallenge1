@@ -23,7 +23,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 @AutoConfigureMockMvc
 @Transactional
 @TestPropertySource(properties = "spring.docker.compose.enabled=false")
-abstract class IntegrationTestBase {
+public abstract class IntegrationTestBase {
 
     static final PostgreSQLContainer<?> POSTGRES;
 

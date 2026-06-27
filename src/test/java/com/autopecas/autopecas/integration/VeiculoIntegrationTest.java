@@ -2,7 +2,7 @@ package com.autopecas.autopecas.integration;
 
 import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -121,7 +121,7 @@ class VeiculoIntegrationTest extends IntegrationTestBase {
             mockMvc.perform(post(BASE)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(dto)))
-                    .andExpect(status().is5xxServerError()); // BusinessException do VO Placa
+                    .andExpect(status().is4xxClientError()); // BusinessException do VO Placa → 422
         }
 
         @Test
@@ -206,9 +206,9 @@ class VeiculoIntegrationTest extends IntegrationTestBase {
             mockMvc.perform(delete(BASE + "/" + id))
                     .andExpect(status().isNoContent());
 
-            // Veículo soft-deleted: busca direta retorna 404 ou ativo=false
+            // Veículo soft-deleted: GET retorna 404 (inativo não é retornado)
             mockMvc.perform(get(BASE + "/" + id))
-                    .andExpect(jsonPath("$.ativo", is(false)));
+                    .andExpect(status().isNotFound());
         }
     }
 }

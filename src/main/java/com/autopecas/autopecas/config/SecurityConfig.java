@@ -1,125 +1,85 @@
 package com.autopecas.autopecas.config;
 
-import com.autopecas.autopecas.security.KeycloakJwtAuthConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
-/**
- * Configuracao de seguranca integrada ao Keycloak via OAuth2 Resource Server.
- *
- * Roles esperadas no token JWT (mapeadas do Keycloak):
- * - ROLE_ADMIN     -> acesso total
- * - ROLE_ATENDENTE -> criar/consultar OS, orcamentos, clientes e veiculos
- * - ROLE_MECANICO  -> atualizar status de OS, consultar pecas e servicos
- * - ROLE_CLIENTE   -> visualizar OS e veiculos proprios, aprovar/rejeitar orcamentos
- */
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity // 1. ATIVA A SEGURANÇA POR ANOTAÇÃO NOS CONTROLLERS
 public class SecurityConfig {
 
-    private final KeycloakJwtAuthConverter keycloakJwtAuthConverter;
-
-    public SecurityConfig(KeycloakJwtAuthConverter keycloakJwtAuthConverter) {
-        this.keycloakJwtAuthConverter = keycloakJwtAuthConverter;
-    }
+    private static final String[] SWAGGER_WHITELIST = {
+            "/v3/api-docs/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html"
+    };
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-
-                        // Documentacao e health check -- publicos
-                        .requestMatchers(
-                                "/swagger-ui/**",
-                                "/swagger-ui.html",
-                                "/v3/api-docs/**",
-                                "/actuator/health"
-                        ).permitAll()
-
-                        // Endpoint publico para acompanhamento de OS sem autenticacao
-                        .requestMatchers(HttpMethod.GET, "/api/ordens-servico/acompanhamento/**").permitAll()
-
-                        // Gestao de funcionarios -- somente ADMIN
-                        .requestMatchers("/api/funcionarios/**")
-                        .hasRole("ADMIN")
-
-                        // CRUD de clientes -- ADMIN e ATENDENTE
-                        .requestMatchers("/api/clientes/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Consulta de veiculos -- ADMIN, ATENDENTE e CLIENTE
-                        .requestMatchers(HttpMethod.GET, "/api/veiculos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "CLIENTE")
-
-                        // Criacao/atualizacao/exclusao de veiculos -- ADMIN e ATENDENTE
-                        .requestMatchers("/api/veiculos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Criacao de OS -- ADMIN e ATENDENTE
-                        .requestMatchers(HttpMethod.POST, "/api/ordens-servico")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Aprovacao de orcamento -- ADMIN, ATENDENTE e CLIENTE (antes da regra geral de PATCH)
-                        .requestMatchers(HttpMethod.PATCH, "/api/ordens-servico/*/orcamentos/*/aprovar")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "CLIENTE")
-
-                        // Rejeicao de orcamento -- ADMIN, ATENDENTE e CLIENTE (antes da regra geral de PATCH)
-                        .requestMatchers(HttpMethod.PATCH, "/api/ordens-servico/*/orcamentos/*/rejeitar")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "CLIENTE")
-
-                        // Atualizacao de status e demais PATCHes de OS -- ADMIN, ATENDENTE e MECANICO
-                        .requestMatchers(HttpMethod.PATCH, "/api/ordens-servico/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "MECANICO")
-
-                        // Listagem e detalhe de OS -- ADMIN, ATENDENTE, MECANICO e CLIENTE
-                        .requestMatchers(HttpMethod.GET, "/api/ordens-servico/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "MECANICO", "CLIENTE")
-
-                        // Consulta de orcamentos -- ADMIN, ATENDENTE e CLIENTE
-                        .requestMatchers(HttpMethod.GET, "/api/ordens-servico/*/orcamentos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "CLIENTE")
-
-                        // Criacao e envio de orcamentos -- ADMIN e ATENDENTE
-                        .requestMatchers("/api/ordens-servico/*/orcamentos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Consulta de servicos -- ADMIN, ATENDENTE e MECANICO
-                        .requestMatchers(HttpMethod.GET, "/api/servicos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE", "MECANICO")
-
-                        // CRUD completo de servicos -- ADMIN e ATENDENTE
-                        .requestMatchers("/api/servicos/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Consulta de pecas -- ADMIN, ATENDENTE e MECANICO
-                        .requestMatchers(HttpMethod.GET, "/api/pecas/**")
-                        .hasAnyRole("ADMIN", "TENDENTE", "MECANICO")
-
-                        // CRUD completo de pecas e estoque -- ADMIN e ATENDENTE
-                        .requestMatchers("/api/pecas/**")
-                        .hasAnyRole("ADMIN", "ATENDENTE")
-
-                        // Dashboard e relatorios -- somente ADMIN
-                        .requestMatchers("/api/dashboard/**")
-                        .hasRole("ADMIN")
-
-                        // Qualquer outra rota exige autenticacao
+                        .requestMatchers(SWAGGER_WHITELIST).permitAll()
                         .anyRequest().authenticated()
                 )
-                .oauth2ResourceServer(oauth2 ->
-                        oauth2.jwt(jwt ->
-                                jwt.jwtAuthenticationConverter(keycloakJwtAuthConverter)));
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        // 2. DIZ AO OAUTH2 PARA USAR O NOSSO CONVERSOR DE ROLES
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                );
 
         return http.build();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder() {
+        String jwkSetUri = "http://keycloak:8080/realms/app-realm/protocol/openid-connect/certs";
+        NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
+
+        String issuerUri = "http://localhost:9080/realms/app-realm";
+        OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
+
+        jwtDecoder.setJwtValidator(withIssuer);
+        return jwtDecoder;
+    }
+
+    // 3. CONVERSOR: PEGA AS ROLES DO KEYCLOAK E TRANSFORMA EM ROLES DO SPRING
+    @Bean
+    public JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+
+        converter.setJwtGrantedAuthoritiesConverter(jwt -> {
+            Map<String, Object> realmAccess = jwt.getClaim("realm_access");
+
+            if (realmAccess == null || realmAccess.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            @SuppressWarnings("unchecked")
+            List<String> roles = (List<String>) realmAccess.get("roles");
+
+            // Adiciona o prefixo "ROLE_" que o Spring exige (ex: "admin" vira "ROLE_admin")
+            return roles.stream()
+                    .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                    .collect(Collectors.toList());
+        });
+
+        return converter;
     }
 }

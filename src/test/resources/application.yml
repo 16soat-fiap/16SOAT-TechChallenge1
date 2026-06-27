@@ -28,14 +28,6 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          # Qualquer valor serve — o @Bean @Primary do SecurityTestConfig
-          # substitui o JwtDecoder real antes de qualquer chamada HTTP.
-          issuer-uri: http://localhost:9999/realms/autopecas
-
 keycloak:
   client-id: autopecas-api
   realm: autopecas

@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Perfil "test" — Testes de integração com Testcontainers + PostgreSQL
+#
+# NÃO configura datasource aqui.
+# O @DynamicPropertySource em cada classe de teste injeta a URL/credenciais
+# do container em execução, sobrescrevendo qualquer valor estático.
+#
+# Vantagem: contexto Spring pode ser cacheado entre classes de teste
+# que usem o mesmo container (graças ao @Container static + withReuse).
+# ─────────────────────────────────────────────────────────────────────────────
+
+spring:
+  jpa:
+    # O Hibernate cria e dropa o schema a cada execução da suíte.
+    # Troque por "validate" se o projeto usar Flyway/Liquibase.
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+  # Desativa o auto-configure de Flyway no perfil de teste
+  # para evitar conflito com ddl-auto: create-drop.
+  # Remova se o projeto já usar Flyway (ajuste o ddl-auto para "validate").
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Qualquer valor serve — o @Bean @Primary do SecurityTestConfig
+          # substitui o JwtDecoder real antes de qualquer chamada HTTP.
+          issuer-uri: http://localhost:9999/realms/autopecas
+
+keycloak:
+  client-id: autopecas-api
+  realm: autopecas
+
+logging:
+  level:
+    org.springframework.security: WARN
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN
+    com.autopecas: DEBUG

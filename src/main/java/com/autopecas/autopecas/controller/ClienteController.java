@@ -9,6 +9,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,32 +22,41 @@ public class ClienteController {
 
     private final ClienteService clienteService;
 
+    // CLIENTE não pode listar todos — apenas consultar o próprio cadastro pelo ID
     @GetMapping
-    public ResponseEntity<List<ClienteResponseDTO>> listar(){
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
+    public ResponseEntity<List<ClienteResponseDTO>> listar() {
         return ResponseEntity.ok(clienteService.listar());
     }
 
+    // CLIENTE pode consultar o próprio cadastro pelo ID
     @GetMapping("/{id}")
-    public ResponseEntity<ClienteResponseDTO> buscarPorId(@PathVariable UUID id){
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    public ResponseEntity<ClienteResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(clienteService.buscarPorId(id));
     }
 
+    // Busca por documento — uso interno da oficina
     @GetMapping("/buscarDOC")
-    public ResponseEntity<ClienteResponseDTO> buscarPorDocumento(@RequestParam String documento){
-        return  ResponseEntity.ok(clienteService.buscarPorDocumento(documento));
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
+    public ResponseEntity<ClienteResponseDTO> buscarPorDocumento(@RequestParam String documento) {
+        return ResponseEntity.ok(clienteService.buscarPorDocumento(documento));
     }
 
     @PostMapping("/pf")
-    public ResponseEntity<ClienteResponseDTO> criarPF(@Valid @RequestBody ClienteCreatePFDTO dto){
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
+    public ResponseEntity<ClienteResponseDTO> criarPF(@Valid @RequestBody ClienteCreatePFDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.criarPF(dto));
     }
 
     @PostMapping("/pj")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<ClienteResponseDTO> criarPJ(@Valid @RequestBody ClienteCreatePJDTO dto) {
         return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.criarPJ(dto));
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<ClienteResponseDTO> atualizar(
             @PathVariable UUID id,
             @Valid @RequestBody ClienteUpdateDTO dto) {
@@ -54,6 +64,7 @@ public class ClienteController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Void> desativar(@PathVariable UUID id) {
         clienteService.desativar(id);
         return ResponseEntity.noContent().build();

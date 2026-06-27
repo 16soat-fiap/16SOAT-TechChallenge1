@@ -1,35 +1,177 @@
+name: autopecas
 services:
+
+  ####################################################
+  ## PostgreSQL da aplicação
+  ####################################################
   postgres:
+
     image: postgres:16-alpine
+
     container_name: postgres_db
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: app_db
+      POSTGRES_USER: autopecas
+      POSTGRES_PASSWORD: autopecas
+
     ports:
       - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: app_db
+
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -U autopecas -d app_db" ]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
-  app:
-    build: .
-    container_name: autopecas_app
-    ports:
-      - "8080:8080"
+    networks:
+      - autopecas-network
+
+  ####################################################
+  ## PostgreSQL do Keycloak
+  ####################################################
+  postgres-keycloak:
+
+    image: postgres:16-alpine
+
+    container_name: postgres_keycloak
+
+    restart: unless-stopped
+
+    # Evita que a integração Spring Boot Docker Compose crie um
+    # JdbcConnectionDetails para este container. Sem isso, o Spring
+    # encontra 2 Postgres no compose (este + o da app) e falha ao
+    # iniciar por não saber qual usar como datasource principal.
+    labels:
+      org.springframework.boot.ignore: true
+
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/app_db
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - postgres_keycloak_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U keycloak -d keycloak" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+    networks:
+      - autopecas-network
+
+  ####################################################
+  ## Keycloak
+  ####################################################
+  keycloak:
+
+    image: quay.io/keycloak/keycloak:26.2
+
+    container_name: keycloak
+
+    restart: unless-stopped
+
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+
+    command:
+      - start-dev
+      - --import-realm
+
+    environment:
+
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres-keycloak
+      KC_DB_URL_PORT: 5432
+      KC_DB_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak
+
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+      KC_HTTP_ENABLED: "true"
+
+    ports:
+      - "8081:8080"
+
+    volumes:
+      - ./keycloak/realms:/opt/keycloak/data/import
+
+    healthcheck:
+      test: [ "CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080" ]
+      interval: 20s
+      timeout: 5s
+      retries: 20
+
+    networks:
+      - autopecas-network
+
+  ####################################################
+  ## Spring Boot (opcional)
+  ####################################################
+  app:
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: autopecas_api
+
+    restart: unless-stopped
+
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
+
+      keycloak:
+        condition: service_healthy
+
+    environment:
+
+      SPRING_PROFILES_ACTIVE: docker
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: app_db
+      DB_USERNAME: autopecas
+      DB_PASSWORD: autopecas
+
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: autopecas
+
+    ports:
+      - "8080:8080"
+
+    networks:
+      - autopecas-network
+
+####################################################
+## Volumes
+####################################################
 
 volumes:
+
   postgres_data:
+
+  postgres_keycloak_data:
+
+####################################################
+## Rede
+####################################################
+
+networks:
+
+  autopecas-network:
+    driver: bridge

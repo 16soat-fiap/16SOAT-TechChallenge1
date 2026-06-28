@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: autopecas-api
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/app_db}
+    username: ${DB_USERNAME:autopecas}
+    password: ${DB_PASSWORD:autopecas}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  # ─────────────────────────────────────────────────────────────
+  # OAuth2 Resource Server — valida tokens JWT emitidos pelo Keycloak
+  # O Spring vai buscar a chave pública no endpoint JWKS do Keycloak
+  # automaticamente usando o issuer-uri abaixo.
+  # ─────────────────────────────────────────────────────────────
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # URI do realm do Keycloak. O Spring busca automaticamente:
+          #   <issuer-uri>/.well-known/openid-configuration
+          # para obter o JWKS e validar assinaturas.
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/autopecas}
+
+# ─────────────────────────────────────────────────────────────
+# Propriedades customizadas do Keycloak (usadas no código)
+# ─────────────────────────────────────────────────────────────
+keycloak:
+  # Nome do client configurado no Keycloak (usado pelo KeycloakJwtAuthConverter
+  # para extrair roles de resource_access.<client-id>.roles)
+  client-id: ${KEYCLOAK_CLIENT_ID:autopecas-api}
+
+  # URL base do Keycloak (usada apenas para documentação/health)
+  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8081}
+  realm: ${KEYCLOAK_REALM:autopecas}
+
+# ─────────────────────────────────────────────────────────────
+# Swagger — configuração do SecurityScheme para testar com JWT
+# ─────────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    oauth:
+      client-id: autopecas-swagger
+      realm: autopecas
+
+server:
+  port: 8080
+
+logging:
+  level:
+    org.springframework.security: DEBUG   # útil para diagnosticar problemas de auth
+    com.autopecas: INFO

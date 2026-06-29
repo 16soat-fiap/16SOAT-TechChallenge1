@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.controller;
 
 import com.autopecas.autopecas.config.SecurityConfig;
+import com.autopecas.autopecas.config.WebMvcSecurityTestConfig;
 import com.autopecas.autopecas.domain.enums.StatusOS;
 import com.autopecas.autopecas.dto.os.*;
 import com.autopecas.autopecas.exception.BusinessException;
@@ -30,7 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(OrdemServicoController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, WebMvcSecurityTestConfig.class})
 @DisplayName("OrdemServicoController")
 class OrdemServicoControllerTest {
 
@@ -83,7 +84,7 @@ class OrdemServicoControllerTest {
             // Given
             OrdemServicoCreateDTO request = new OrdemServicoCreateDTO(UUID.randomUUID(), UUID.randomUUID(), "Barulho no motor", "Cliente aguardará", 123456);
             OrdemServicoResponseDTO response = responseDTO();
-            when(ordemServicoService.criar(any(OrdemServicoCreateDTO.class), eq(null))).thenReturn(response);
+            when(ordemServicoService.criar(any(OrdemServicoCreateDTO.class), any(String.class))).thenReturn(response);
 
             // When / Then
             mockMvc.perform(post("/api/ordens-servico")
@@ -133,7 +134,7 @@ class OrdemServicoControllerTest {
             UUID id = UUID.randomUUID();
             AvancarStatusDTO request = new AvancarStatusDTO("EM_DIAGNOSTICO", "Início do diagnóstico");
             OrdemServicoResponseDTO response = responseDTO();
-            when(ordemServicoService.avancarStatus(eq(id), any(AvancarStatusDTO.class), eq(null))).thenReturn(response);
+            when(ordemServicoService.avancarStatus(eq(id), any(AvancarStatusDTO.class), any(String.class))).thenReturn(response);
 
             // When / Then
             mockMvc.perform(patch("/api/ordens-servico/{id}/status", id)
@@ -155,7 +156,7 @@ class OrdemServicoControllerTest {
             // Given
             UUID id = UUID.randomUUID();
             AvancarStatusDTO request = new AvancarStatusDTO("FINALIZADA", "Pular etapas");
-            when(ordemServicoService.avancarStatus(id, request, null))
+            when(ordemServicoService.avancarStatus(eq(id), eq(request), any(String.class)))
                     .thenThrow(new BusinessException("Transição inválida"));
 
             // When / Then

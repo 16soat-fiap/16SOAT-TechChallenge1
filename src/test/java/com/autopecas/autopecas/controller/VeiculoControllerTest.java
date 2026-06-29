@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.controller;
 
 import com.autopecas.autopecas.config.SecurityConfig;
+import com.autopecas.autopecas.config.WebMvcSecurityTestConfig;
 import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoResponseDTO;
 import com.autopecas.autopecas.dto.veiculo.VeiculoUpdateDTO;
@@ -29,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(VeiculoController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, WebMvcSecurityTestConfig.class})
 @DisplayName("VeiculoController")
 class VeiculoControllerTest {
 

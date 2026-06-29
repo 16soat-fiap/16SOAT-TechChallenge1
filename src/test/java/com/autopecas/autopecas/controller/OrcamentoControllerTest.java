@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.controller;
 
 import com.autopecas.autopecas.config.SecurityConfig;
+import com.autopecas.autopecas.config.WebMvcSecurityTestConfig;
 import com.autopecas.autopecas.dto.orcamento.AprovarRejeitarDTO;
 import com.autopecas.autopecas.dto.orcamento.OrcamentoCreateDTO;
 import com.autopecas.autopecas.dto.orcamento.OrcamentoResponseDTO;
@@ -31,7 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(OrcamentoController.class)
-@Import(SecurityConfig.class)
+@Import({SecurityConfig.class, WebMvcSecurityTestConfig.class})
 @DisplayName("OrcamentoController")
 class OrcamentoControllerTest {
 

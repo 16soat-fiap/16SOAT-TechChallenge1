@@ -1,5 +1,6 @@
 package com.autopecas.autopecas.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -48,6 +49,7 @@ public class SecurityConfig {
     }
 
     @Bean
+    @ConditionalOnMissingBean
     public JwtDecoder jwtDecoder() {
         String jwkSetUri = "http://keycloak:8080/realms/app-realm/protocol/openid-connect/certs";
         NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();

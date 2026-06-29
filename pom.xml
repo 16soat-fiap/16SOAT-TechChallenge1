@@ -30,6 +30,8 @@
 		<java.version>21</java.version>
 		<mapstruct.version>1.5.5.Final</mapstruct.version>
         <jacoco.version>0.8.12</jacoco.version>
+		<sonar.projectKey>16SOAT-TechChallenge</sonar.projectKey>
+		<sonar.host.url>http://localhost:9000</sonar.host.url>
 	</properties>
 	<dependencies>
 		<dependency>

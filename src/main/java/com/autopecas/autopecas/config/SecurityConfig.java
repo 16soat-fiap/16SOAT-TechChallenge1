@@ -1,5 +1,6 @@
 package com.autopecas.autopecas.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,8 +24,14 @@ import java.util.stream.Collectors;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // 1. ATIVA A SEGURANÇA POR ANOTAÇÃO NOS CONTROLLERS
+@EnableMethodSecurity
 public class SecurityConfig {
+
+    @Value("${spring.security.oauth2.resourceserver.jwt.jwk-set-uri}")
+    private String jwkSetUri;
+
+    @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}")
+    private String issuerUri;
 
     private static final String[] SWAGGER_WHITELIST = {
             "/v3/api-docs/**",
@@ -41,7 +48,6 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        // 2. DIZ AO OAUTH2 PARA USAR O NOSSO CONVERSOR DE ROLES
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
                 );
 
@@ -51,17 +57,14 @@ public class SecurityConfig {
     @Bean
     @ConditionalOnMissingBean
     public JwtDecoder jwtDecoder() {
-        String jwkSetUri = "http://keycloak:8080/realms/app-realm/protocol/openid-connect/certs";
+        // Dynamically injected URLs handle the Docker networking split
         NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withJwkSetUri(jwkSetUri).build();
-
-        String issuerUri = "http://localhost:9080/realms/app-realm";
         OAuth2TokenValidator<Jwt> withIssuer = JwtValidators.createDefaultWithIssuer(issuerUri);
 
         jwtDecoder.setJwtValidator(withIssuer);
         return jwtDecoder;
     }
 
-    // 3. CONVERSOR: PEGA AS ROLES DO KEYCLOAK E TRANSFORMA EM ROLES DO SPRING
     @Bean
     public JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
@@ -76,7 +79,6 @@ public class SecurityConfig {
             @SuppressWarnings("unchecked")
             List<String> roles = (List<String>) realmAccess.get("roles");
 
-            // Adiciona o prefixo "ROLE_" que o Spring exige (ex: "admin" vira "ROLE_admin")
             return roles.stream()
                     .map(role -> new SimpleGrantedAuthority("ROLE_" + role))
                     .collect(Collectors.toList());

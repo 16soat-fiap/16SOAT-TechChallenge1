@@ -69,7 +69,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --head -fsS http://localhost:9000/health/ready | echo $?"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   app:
     build: .
@@ -80,12 +85,13 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/app_db
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
-      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/app-realm
+      OAUTH2_JWK_URI: http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs
+      OAUTH2_ISSUER_URI: http://localhost:9080/realms/autopecas
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
-        condition: service_started
+        condition: service_healthy # Changed from service_started
     restart: unless-stopped
 
 volumes:

@@ -5,5 +5,14 @@ spring:
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # A URL interna (Backend falando com Keycloak via rede do Docker Compose)
+          jwk-set-uri: http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs
+          # A URL externa (Validação da origem do Token emitido pro cliente)
+          issuer-uri: http://localhost:9080/realms/autopecas
+
   jackson:
     time-zone: UTC

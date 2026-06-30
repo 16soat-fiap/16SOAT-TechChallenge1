@@ -17,20 +17,6 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
 
-  # ─────────────────────────────────────────────────────────────
-  # OAuth2 Resource Server — valida tokens JWT emitidos pelo Keycloak
-  # O Spring vai buscar a chave pública no endpoint JWKS do Keycloak
-  # automaticamente usando o issuer-uri abaixo.
-  # ─────────────────────────────────────────────────────────────
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          # URI do realm do Keycloak. O Spring busca automaticamente:
-          #   <issuer-uri>/.well-known/openid-configuration
-          # para obter o JWKS e validar assinaturas.
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8081/realms/autopecas}
-
 # ─────────────────────────────────────────────────────────────
 # Propriedades customizadas do Keycloak (usadas no código)
 # ─────────────────────────────────────────────────────────────

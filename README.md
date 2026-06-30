@@ -10,9 +10,10 @@ Este projeto é o Back-end da primeira versão (MVP) do sistema de gestão para 
 *   **Framework:** Spring Boot 4.0.6
 *   **Gerenciador de Dependências:** Maven
 *   **Banco de Dados:** PostgreSQL
-* **Segurança:** Spring Security com Keycloak
-* **Autenticação/Autorização:** Keycloak (Identity and Access Management)
-* **Especificações:** Jakarta EE
+*   **Segurança:** Spring Security & OAuth2 Resource Server (Integração com Keycloak via JWT)
+*   **Mapeamento de Objetos:** MapStruct 1.5.5.Final & Lombok
+*   **Documentação da API:** Springdoc OpenAPI UI (Swagger) v3.0.3
+*   **Qualidade & Testes:** JUnit 5, Testcontainers (PostgreSQL Real), Jacoco, SonarQube
 
 ## 📐 Arquitetura e Design
 
@@ -20,6 +21,9 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
 
 *   **Modelos Ricos:** Lógica de negócio encapsulada nas entidades de domínio.
 *   **Value Objects:** Uso de Java Records para imutabilidade e encapsulamento de atributos.
+
+Diagramas de Domain Storytelling e Event Storming:
+https://miro.com/welcomeonboard/UkU2NWZwU0tQSGplQVd2ckpBbHlHdnkxWThxcmh0K1RuTnB5NS83N0E1Z1FDMFhYK0dQUC9wbHpPM3F0NUhzdVBQWGZsMGNKckxIUzdiYTM0T3RhcmtzSWVKdTduSlRNUTY3aHBBNVN2RUhFMG80VDZwSXB6eFJEV1MxbnV2eVhzVXVvMm53MW9OWFg5bkJoVXZxdFhRPT0hdjE=?share_link_id=737223824198
 
 ## 📂 Estrutura do Projeto
 
@@ -34,7 +38,6 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
 *   JDK 21
 *   Maven 3.9+
 *   Docker e Docker Compose
-*   Keycloak (provisionado via Docker Compose)
 
 ### Passos para execução
 
@@ -44,14 +47,9 @@ A aplicação foi desenvolvida seguindo os princípios da **Arquitetura em camad
     cd 16SOAT-TechChallenge1
     ```
 
-2. **Configurar o Banco de Dados (via Docker):**
+2. **Compilar e Rodar a Aplicação:**
    ```bash
-   docker-compose up -d
-   ```
-   
-3. **Compilar e Rodar a Aplicação:**
-   ```bash
-   ./mvnw spring-boot:run
+   docker-compose up  --build -d
    ```
 
 ## 🧪 Testes
@@ -61,39 +59,38 @@ Para executar apenas os testes:
 ./mvnw test
 ```
 
-Para executar o ciclo completo com empacotamento e geração do relatório de cobertura via JaCoCo:
-```bash
-./mvnw verify
-```
+Para executar o ciclo completo com empacotamento e geração do relatório de cobertura via SonarQube (certifique-se de que o compose já esteja rodando):
+
+
+1. **No seu navegador, acesse: http://localhost:9000 (ou http://127.0.0.1:9000)**
+
+2. **Faça login utilizando as credenciais padrão:**
+    - Usuário: admin
+    - Senha: admin
+
+3. **O sistema solicitará que você redefina a senha para um novo valor de sua preferência.**
+
+4. **Na tela inicial do SonarQube, clique em Create Project e depois em Manually.**
+
+5. **Preencha os campos:**
+    - Project Key: 16SOAT-TechChallenge
+    - Display Name: 16SOAT-TechChallenge
+
+6. **Escolha a opção de analisar o código Localmente (Locally).**
+
+7. **Na etapa seguinte, clique em Generate para criar um Token. Copie este token imediatamente, pois ele não será exibido novamente.**
+
+8. **Execute o comando:**
+    ```bash
+    ./mvnw clean verify sonar:sonar "-Dsonar.token=<seu_token>"
+    ```
+
+9. **Aguarde o processo finalizar com a mensagem BUILD SUCCESS.**
+
+10. **Retorne ao seu navegador na página do SonarQube (http://localhost:9000). A página do seu projeto será atualizada automaticamente.**
 
 > Observação: o `verify` validado neste projeto utiliza a infraestrutura disponível no `docker-compose.yml` e um teste de contexto sobe a aplicação com o profile `dev`.
 
-## 📊 Cobertura de Testes com JaCoCo
-
-O `JaCoCo` está configurado no `pom.xml` para:
-
-- instrumentar a suíte durante os testes (`prepare-agent`)
-- gerar o relatório no ciclo `verify` (`report`)
-- publicar saídas em HTML, XML e CSV
-
-Arquivos gerados após `./mvnw verify`:
-
-- `target/site/jacoco/index.html`
-- `target/site/jacoco/jacoco.xml`
-- `target/site/jacoco/jacoco.csv`
-
-### Cobertura real validada
-
-Cobertura extraída de uma execução real de `./mvnw verify` em `2026-06-21`, com `BUILD SUCCESS` e `310` testes executados.
-
-| Pacote | Instruções | Branches | Linhas | Métodos |
-| --- | ---: | ---: | ---: | ---: |
-| `com.autopecas.autopecas.controller` | 83,74% | 66,67% | 86,79% | 84,09% |
-| `com.autopecas.autopecas.service` | 91,73% | 73,19% | 95,79% | 83,84% |
-| `com.autopecas.autopecas.domain.entity` | 100,00% | 100,00% | 100,00% | 100,00% |
-| `com.autopecas.autopecas.domain.enums` | 100,00% | 100,00%* | 100,00% | 100,00% |
-
-\* Para `domain.enums`, o relatório não registra desvios condicionais; por isso o total de branches é `0/0` e o JaCoCo o apresenta como 100%.
 
 ---
 Desenvolvido como parte do Tech Challenge da FIAP.

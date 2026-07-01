@@ -180,8 +180,66 @@ A autenticação é feita via **JWT emitido pelo Keycloak**. A aplicação atua 
 ### Keycloak (ambiente Docker)
 - **URL:** `http://localhost:9080`
 - **Usuário admin:** `admin` / `admin`
-- **Realm:** `app-realm` (importado automaticamente via `keycloak/realm-export.json`)
-- **Issuer URI:** `http://keycloak:8080/realms/app-realm`
+- **Realm:** `autopecas` (importado automaticamente via `keycloak/realm-export.json`)
+- **Issuer URI:** `http://keycloak:8080/realms/autopecas`
+
+## 🔑 Autenticação da API
+
+### Obter um token de acesso
+
+Execute o comando abaixo para autenticar com o usuário importado:
+
+```bash
+curl -X POST "http://localhost:9080/realms/autopecas/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "client_id=autopecas-api" \
+  -d "username=test_user" \
+  -d "password=1234"
+```
+
+Se as credenciais estiverem corretas, a resposta será semelhante a:
+
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIs...",
+  "expires_in": 300,
+  "refresh_expires_in": 1800,
+  "refresh_token": "...",
+  "token_type": "Bearer"
+}
+```
+
+Copie o valor de `access_token`.
+
+### Utilizando o token
+
+Inclua o token no cabeçalho `Authorization` das requisições:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+Exemplo com `curl`:
+
+```bash
+curl -X GET "http://localhost:8080/api/clientes" \
+  -H "Authorization: Bearer <access_token>"
+```
+
+### Autenticação pelo Swagger
+
+1. Acesse `http://localhost:8080/swagger-ui.html`.
+2. Clique no botão **Authorize**.
+3. Informe o token no formato:
+
+```text
+Bearer <access_token>
+```
+
+4. Clique em **Authorize** e feche a janela.
+
+A partir desse momento, todas as requisições realizadas pelo Swagger incluirão automaticamente o token JWT.
 
 ---
 
@@ -443,7 +501,7 @@ environment:
   SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/app_db
   SPRING_DATASOURCE_USERNAME: postgres
   SPRING_DATASOURCE_PASSWORD: postgres
-  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/app-realm
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/autopecas
 ```
 
 ---

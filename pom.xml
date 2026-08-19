@@ -30,6 +30,7 @@
 		<java.version>21</java.version>
 		<mapstruct.version>1.5.5.Final</mapstruct.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <archunit.version>1.3.0</archunit.version>
 		<sonar.projectKey>16SOAT-TechChallenge</sonar.projectKey>
 		<sonar.host.url>http://localhost:9000</sonar.host.url>
 	</properties>
@@ -146,6 +147,13 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security-oauth2-resource-server</artifactId>
         </dependency>
+        <!-- ArchUnit — as fronteiras da arquitetura hexagonal viram teste que quebra a build -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>${archunit.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
 	<build>
@@ -187,19 +195,25 @@
                     <excludes>
                         <!-- Classe principal do Spring Boot, sem lógica própria -->
                         <exclude>**/AutopecasApplication.class</exclude>
-                        <!-- DTOs (records): sem lógica de negócio, cobertura trivial/automática -->
-                        <exclude>**/dto/**</exclude>
+                        <!-- DTOs HTTP (records): sem lógica de negócio -->
+                        <exclude>**/adapter/in/web/dto/**</exclude>
                         <!-- Mappers MapStruct: a implementação é gerada em build-time -->
-                        <exclude>**/mapper/**Mapper.class</exclude>
-                        <exclude>**/mapper/**MapperImpl.class</exclude>
-                        <!-- Enums e Value Objects simples, sem lógica condicional relevante -->
+                        <exclude>**/adapter/in/web/mapper/**Mapper.class</exclude>
+                        <exclude>**/adapter/in/web/mapper/**MapperImpl.class</exclude>
+                        <!-- Entidades JPA: estrutura de persistência, sem regra de negócio -->
+                        <exclude>**/adapter/out/persistence/entity/**</exclude>
+                        <!-- Projeções de leitura (records) -->
+                        <exclude>**/adapter/out/persistence/projection/**</exclude>
+                        <!-- Commands e views das ports (records) -->
+                        <exclude>**/application/port/in/view/**</exclude>
+                        <!-- Enums do negócio, sem lógica condicional -->
                         <exclude>**/domain/enums/**</exclude>
-                        <!-- Configuração de infraestrutura (beans declarativos) -->
+                        <!-- Wiring e configuração de infraestrutura (beans declarativos) -->
                         <exclude>**/config/**</exclude>
                         <!-- Exceptions simples (sem lógica, apenas construtores) -->
-                        <exclude>**/exception/BusinessException.class</exclude>
-                        <exclude>**/exception/ResourceNotFoundException.class</exclude>
-                        <exclude>**/exception/EstoqueInsuficienteException.class</exclude>
+                        <exclude>**/domain/exception/BusinessException.class</exclude>
+                        <exclude>**/domain/exception/ResourceNotFoundException.class</exclude>
+                        <exclude>**/domain/exception/EstoqueInsuficienteException.class</exclude>
                     </excludes>
                 </configuration>
                 <executions>

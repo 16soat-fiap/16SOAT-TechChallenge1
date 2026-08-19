@@ -1,14 +1,14 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
-import com.autopecas.autopecas.dto.funcionario.MecanicoCreateDTO;
-import com.autopecas.autopecas.dto.orcamento.AprovarRejeitarDTO;
-import com.autopecas.autopecas.dto.orcamento.OrcamentoCreateDTO;
-import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
-import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
-import com.autopecas.autopecas.dto.peca.PecaCreateDTO;
-import com.autopecas.autopecas.dto.servico.ServicoCreateDTO;
-import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePFDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.funcionario.MecanicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.orcamento.AprovarRejeitarDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.orcamento.OrcamentoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AvancarStatusDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.OrdemServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.peca.PecaCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.servico.ServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.veiculo.VeiculoCreateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

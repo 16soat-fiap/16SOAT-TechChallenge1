@@ -36,6 +36,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 | Mapeamento de Objetos        | MapStruct 1.5.5.Final + Lombok 1.18.38                  |
 | Documentação da API          | Springdoc OpenAPI UI (Swagger) 3.0.3                    |
 | Testes                       | JUnit 5 + Testcontainers (PostgreSQL real)              |
+| Fronteiras de Arquitetura    | ArchUnit 1.3.0 (11 regras, quebram a build)             |
 | Cobertura de Código          | JaCoCo 0.8.12 (mínimo 80% de linhas)                   |
 | Análise de Qualidade         | SonarQube (Community Edition)                           |
 | Containerização              | Docker + Docker Compose                                 |
@@ -44,75 +45,104 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 
 ## 📐 Arquitetura e Design
 
-A aplicação segue os princípios de **Arquitetura em Camadas** combinada com **Domain-Driven Design (DDD)**:
+A aplicação segue **Arquitetura Hexagonal (Ports & Adapters)** com **Domain-Driven Design**. A
+regra que organiza tudo é a **direção da dependência**: ela aponta sempre para dentro.
 
 ```
-┌─────────────────────────────────────────────┐
-│              Controller (REST)               │  ← Entrada HTTP / Validação
-├─────────────────────────────────────────────┤
-│                  Service                     │  ← Casos de Uso / Orquestração
-├─────────────────────────────────────────────┤
-│              Domain (Entidades)              │  ← Regras de Negócio Encapsuladas
-├─────────────────────────────────────────────┤
-│               Repository (JPA)              │  ← Persistência
-└─────────────────────────────────────────────┘
+                     ┌──────────────────────────────────────┐
+                     │            ADAPTERS (fora)           │
+   HTTP / Keycloak ──┤  adapter/in/web                      │
+                     │      ↓ chama inbound port            │
+                     │  ┌────────────────────────────────┐  │
+                     │  │      APPLICATION (casos de uso) │  │
+                     │  │  port/in  ·  usecase  ·  port/out│  │
+                     │  │  ┌──────────────────────────┐   │  │
+                     │  │  │    DOMAIN (Java puro)    │   │  │
+                     │  │  │ agregados · VOs · regras │   │  │
+                     │  │  └──────────────────────────┘   │  │
+                     │  └────────────────────────────────┘  │
+                     │      ↑ implementa outbound port      │
+   PostgreSQL ───────┤  adapter/out/persistence · clock ·   │
+                     │  numbering · tx                      │
+                     └──────────────────────────────────────┘
+```
+
+```bash
+javac -d /tmp/dominio $(find src/main/java/com/autopecas/autopecas/domain -name "*.java")
 ```
 
 **Princípios aplicados:**
-- **Modelos Ricos:** lógica de negócio encapsulada nas entidades de domínio, não nos services.
-- **Value Objects:** Java Records para imutabilidade — `CPF`, `CNPJ`, `Placa`, `Endereco`.
-- **Herança de Domínio:** `Cliente` (abstrato) → `ClientePF` / `ClientePJ`; `Funcionario` (abstrato) → `Atendente` / `Mecanico`.
-- **Separação de DTOs:** objetos de entrada/saída isolados da camada de domínio via MapStruct.
-- **Profiles Spring:** `dev` (local com Docker Compose) e `prod` (variáveis de ambiente externas).
+- **Ports & Adapters:** 8 inbound ports (uma por agregado) e 15 outbound ports. A aplicação
+  declara o que precisa; quem implementa é sempre um adapter.
+- **Modelos ricos e encapsulados:** construtores privados, factory methods (`abrir`, `criar`,
+  `reconstituir`), coleções imutáveis e **nenhum setter público** — a regra de negócio não pode
+  ser burlada de fora.
+- **Value Objects imutáveis:** `CPF`, `CNPJ`, `Placa`, `Endereco` como Java records, validando no
+  construtor.
+- **Referências entre agregados por id**, não por objeto — o que elimina o acoplamento a
+  lazy-loading do Hibernate.
+- **Persistência separada do domínio:** as entidades JPA (`*JpaEntity`) vivem no adapter, e
+  mappers escritos à mão convertem nos dois sentidos.
+- **Tempo e numeração como ports:** `Relogio` e `GeradorNumeroOS`/`GeradorMatricula`. O domínio
+  nunca chama `LocalDateTime.now()` — recebe o instante por parâmetro, o que torna as regras
+  determinísticas.
+- **Transação como port:** `Transacao` (implementada com `TransactionTemplate`). Nenhum caso de
+  uso conhece `@Transactional`.
+- **Paginação própria:** `PaginaRequisicao`/`Pagina` atravessam as ports; `Pageable`/`Page` do
+  Spring ficam confinados ao adapter web, que remonta o envelope JSON original.
+- **CQRS-lite nas leituras:** listagens e dashboard usam *query ports* com projeção SQL, evitando
+  o N+1 que existiria ao carregar agregados só para ler nome do cliente e placa.
+- **Fronteiras verificadas por ArchUnit:** 11 regras que quebram a build se alguém furar o
+  hexágono (ver `arquitetura/ArquiteturaHexagonalTest`).
 
 ---
 
 ## 📂 Estrutura do Projeto
 
 ```
-src/
-├── main/
-│   ├── java/com/autopecas/autopecas/
-│   │   ├── AutopecasApplication.java          # Entry point Spring Boot
-│   │   ├── config/                            # Beans de configuração (OpenAPI, etc.)
-│   │   ├── controller/                        # Controllers REST
-│   │   │   ├── ClienteController.java
-│   │   │   ├── VeiculoController.java
-│   │   │   ├── FuncionarioController.java
-│   │   │   ├── PecaController.java
-│   │   │   ├── ServicoController.java
-│   │   │   ├── OrdemServicoController.java
-│   │   │   ├── OrcamentoController.java
-│   │   │   └── DashboardController.java
-│   │   ├── domain/
-│   │   │   ├── entity/                        # Entidades JPA do domínio (17 classes)
-│   │   │   ├── enums/                         # Enumerações do negócio (7 enums)
-│   │   │   └── valueobject/                   # Value Objects imutáveis (Records)
-│   │   ├── dto/                               # DTOs de entrada e saída por módulo
-│   │   ├── exception/                         # Exceções de negócio customizadas
-│   │   ├── mapper/                            # Interfaces MapStruct
-│   │   ├── repository/                        # Interfaces Spring Data JPA
-│   │   ├── security/                          # Configuração de segurança e JWT Converter
-│   │   └── service/                           # Casos de uso e regras de aplicação
-│   └── resources/
-│       ├── application.yml                    # Configuração base (profile ativo)
-│       ├── application-dev.yml                # Configuração perfil DEV
-│       ├── application-prod.yml               # Configuração perfil PROD
-│       └── db/migration/
-│           ├── V1__schema_inicial.sql          # Criação das tabelas
-│           └── V2__add_sequences.sql           # Sequências de numeração
-├── test/
-│   ├── java/com/autopecas/autopecas/
-│   │   ├── controller/                        # Testes de Controller (MockMvc)
-│   │   ├── domain/entity/                     # Testes unitários de entidades
-│   │   └── AutopecasApplicationTests.java     # Teste de contexto
-│   └── resources/
-│       ├── application.yml                    # Configuração de testes
-│       └── init-test.sql                      # Script de dados iniciais para testes
-├── keycloak/
-│   └── realm-export.json                      # Configuração do realm (import automático)
-├── Dockerfile                                 # Build multi-stage (Maven → JRE)
-└── docker-compose.yml                         # Orquestração de todos os serviços
+src/main/java/com/autopecas/autopecas/
+├── AutopecasApplication.java
+│
+├── domain/                          # ZERO dependências — nem framework, nem Lombok
+│   ├── model/
+│   │   ├── cliente/                 # Cliente (abstrato), ClientePF, ClientePJ
+│   │   ├── funcionario/             # Funcionario (abstrato), Atendente, Mecanico
+│   │   ├── veiculo/                 # Veiculo
+│   │   ├── os/                      # OrdemServico (raiz), ItemServicoOS, ItemPecaOS,
+│   │   │                            #   HistoricoStatusOS
+│   │   ├── orcamento/               # Orcamento (raiz), ItemOrcamentoServico, ItemOrcamentoPeca
+│   │   └── estoque/                 # Peca, Servico, MovimentacaoEstoque
+│   ├── vo/                          # CPF, CNPJ, Placa, Endereco (records)
+│   ├── enums/                       # 7 enums do negócio
+│   ├── exception/                   # BusinessException, ResourceNotFound, EstoqueInsuficiente
+│   └── service/                     # MovimentadorDeEstoque (domain service puro)
+│
+├── application/                     # Depende SÓ de domain + JDK
+│   ├── port/in/                     # 8 inbound ports + commands aninhados
+│   │   └── view/                    # Projeções de leitura (records)
+│   ├── port/out/                    # Repositórios, query ports, Relogio, geradores, Transacao
+│   ├── pagination/                  # PaginaRequisicao, Pagina
+│   └── usecase/                     # 8 casos de uso, sem anotação de framework
+│
+├── adapter/
+│   ├── in/web/                      # Controllers REST, DTOs, mappers MapStruct, handler de erro
+│   └── out/
+│       ├── persistence/             # entity/ (JPA), repository/ (Spring Data), mapper/,
+│       │                            #   adapter/ (implementa as ports), projection/
+│       ├── clock/                   # RelogioSistema
+│       ├── numbering/               # Geradores sobre sequences do Postgres
+│       └── tx/                      # TransacaoSpring
+│
+├── config/                          # UseCaseConfig (wiring), SecurityConfig, OpenApiConfig
+└── security/                        # KeycloakJwtAuthConverter
+
+src/test/java/com/autopecas/autopecas/
+├── arquitetura/                     # ArquiteturaHexagonalTest — fronteiras como teste
+├── domain/                          # Testes puros: sem Spring, sem mocks, sem banco
+├── application/
+│   ├── fake/                        # Fakes das ports (TransacaoDireta, RelogioFixo, geradores)
+│   └── usecase/                     # Testes de caso de uso contra dublês das ports
+└── integration/                     # Testcontainers + PostgreSQL real (schema via Flyway)
 ```
 
 ---
@@ -366,12 +396,17 @@ O relatório HTML é gerado em `target/site/jacoco/index.html`.
 
 ### Estratégia de Testes
 
-| Tipo                    | Descrição                                                                      |
-|-------------------------|--------------------------------------------------------------------------------|
-| **Testes Unitários**    | Entidades de domínio isoladas — sem Spring Context                             |
-| **Testes de Controller**| MockMvc com `@WebMvcTest` e `@WithMockUser`                                    |
-| **Testes de Integração**| Testcontainers sobe um PostgreSQL real para validar queries e migrações Flyway |
-| **Teste de Contexto**   | `AutopecasApplicationTests` valida que o Spring Context sobe com profile `dev` |
+| Tipo                       | Descrição                                                                            |
+|----------------------------|--------------------------------------------------------------------------------------|
+| **Arquitetura (ArchUnit)** | 11 regras de fronteira: domínio sem framework, aplicação sem Spring, adapters isolados |
+| **Domínio**                | Agregados e Value Objects isolados — sem Spring, sem mocks, sem banco. Rodam em ms    |
+| **Casos de Uso**           | Dublês das *ports* do projeto (não de interfaces do Spring Data) + fakes de tempo e transação |
+| **Integração**             | Testcontainers sobe um PostgreSQL real; o schema vem das **mesmas migrations Flyway** de produção |
+| **Contexto**               | `AutopecasApplicationTests` valida que o Spring Context sobe                          |
+
+> O domínio ser cético de tecnologia tem um efeito prático direto nos testes: as regras de
+> negócio são verificadas sem subir contexto nem container, e o tempo entra por parâmetro, o que
+> permite asserções exatas sobre datas em vez de aproximações.
 
 ### Gate de Cobertura (JaCoCo)
 
@@ -379,10 +414,12 @@ A build falha automaticamente se a cobertura de linhas ficar abaixo de **80%**.
 
 Classes excluídas da contagem (sem lógica de negócio):
 - `AutopecasApplication` (entry point)
-- `dto/**` (Records)
-- `mapper/**Mapper.class` / `**MapperImpl.class` (gerados pelo MapStruct)
+- `adapter/in/web/dto/**` (records de entrada/saída HTTP)
+- `adapter/in/web/mapper/**Mapper(Impl).class` (gerados pelo MapStruct)
+- `adapter/out/persistence/entity/**` e `projection/**` (estrutura de persistência)
+- `application/port/in/view/**` (records de projeção)
 - `domain/enums/**`
-- `config/**`
+- `config/**` (wiring declarativo)
 - Exceções simples (`BusinessException`, `ResourceNotFoundException`, `EstoqueInsuficienteException`)
 
 ---

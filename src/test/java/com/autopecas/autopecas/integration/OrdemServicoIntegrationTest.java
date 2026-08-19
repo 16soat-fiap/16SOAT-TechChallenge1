@@ -1,13 +1,13 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
-import com.autopecas.autopecas.dto.funcionario.AtendenteCreateDTO;
-import com.autopecas.autopecas.dto.funcionario.MecanicoCreateDTO;
-import com.autopecas.autopecas.dto.os.AtribuirMecanicoDTO;
-import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
-import com.autopecas.autopecas.dto.os.DiagnosticoDTO;
-import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
-import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePFDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.funcionario.AtendenteCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.funcionario.MecanicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AtribuirMecanicoDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AvancarStatusDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.DiagnosticoDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.OrdemServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.veiculo.VeiculoCreateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

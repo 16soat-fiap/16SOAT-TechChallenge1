@@ -1,10 +1,11 @@
 package com.autopecas.autopecas.integration;
 
 import com.autopecas.autopecas.config.SecurityTestConfig;
-import com.autopecas.autopecas.domain.entity.Cliente;
-import com.autopecas.autopecas.domain.entity.ClientePF;
-import com.autopecas.autopecas.domain.valueobject.CPF;
-import com.autopecas.autopecas.repository.ClienteRepository;
+import com.autopecas.autopecas.adapter.out.persistence.repository.ClienteJpaRepository;
+import com.autopecas.autopecas.application.port.out.ClienteRepositorio;
+import com.autopecas.autopecas.domain.model.cliente.Cliente;
+import com.autopecas.autopecas.domain.model.cliente.ClientePF;
+import com.autopecas.autopecas.domain.vo.CPF;
 import com.autopecas.autopecas.util.test.JwtTestUtils;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,7 +71,14 @@ class ClienteControllerIntegrationTest {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private ClienteRepository clienteRepository;
+    private ClienteRepositorio clienteRepositorio;
+
+    /**
+     * Usado apenas para limpar a base entre testes. A montagem dos cenários passa pela port;
+     * zerar tabelas é housekeeping de infraestrutura, sem equivalente no domínio.
+     */
+    @Autowired
+    private ClienteJpaRepository clienteJpaRepository;
 
     private MockMvc mockMvc;
 
@@ -81,7 +89,7 @@ class ClienteControllerIntegrationTest {
                 .apply(springSecurity())
                 .build();
 
-        clienteRepository.deleteAll();
+        clienteJpaRepository.deleteAll();
     }
 
     @AfterEach
@@ -136,7 +144,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve retornar 403 quando MECANICO tenta atualizar cliente")
         void deveRetornar403QuandoMecanicoTentaAtualizarCliente() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Teste", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Teste", "52998224725"));
 
             mockMvc.perform(put("/api/clientes/" + salvo.getId())
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenMecanico())
@@ -183,7 +191,7 @@ class ClienteControllerIntegrationTest {
                     .andExpect(jsonPath("$.nome",      is("Maria Silva")))
                     .andExpect(jsonPath("$.documento", is("52998224725")));
 
-            assertThat(clienteRepository.count()).isEqualTo(1);
+            assertThat(clienteRepositorio.ativos().size()).isEqualTo(1);
         }
 
         @Test
@@ -267,9 +275,9 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve listar todos os clientes ativos")
         void deveListarTodosOsClientesAtivos() throws Exception {
-            clienteRepository.save(clientePF("João Teste",  "52998224725"));
-            clienteRepository.save(clientePF("Ana Teste",   "98765432100"));
-            clienteRepository.save(clientePF("Pedro Teste", "11144477735"));
+            clienteRepositorio.salvar(clientePF("João Teste",  "52998224725"));
+            clienteRepositorio.salvar(clientePF("Ana Teste",   "98765432100"));
+            clienteRepositorio.salvar(clientePF("Pedro Teste", "11144477735"));
 
             mockMvc.perform(get("/api/clientes")
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAdmin()))
@@ -289,7 +297,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve buscar cliente por ID")
         void deveBuscarClientePorId() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Carlos Busca", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Carlos Busca", "52998224725"));
 
             mockMvc.perform(get("/api/clientes/" + salvo.getId())
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAtendente()))
@@ -317,7 +325,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve buscar cliente por CPF")
         void deveBuscarClientePorCpf() throws Exception {
-            clienteRepository.save(clientePF("Luiza CPF", "52998224725"));
+            clienteRepositorio.salvar(clientePF("Luiza CPF", "52998224725"));
 
             mockMvc.perform(get("/api/clientes/buscarDOC")
                             .param("documento", "52998224725")
@@ -329,8 +337,8 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("não deve retornar clientes inativos na listagem geral")
         void naoDeveRetornarClientesInativosNaListagem() throws Exception {
-            clienteRepository.save(clientePF("Ativo",    "52998224725"));
-            clienteRepository.save(clienteInativo("Inativo", "98765432100"));
+            clienteRepositorio.salvar(clientePF("Ativo",    "52998224725"));
+            clienteRepositorio.salvar(clienteInativo("Inativo", "98765432100"));
 
             mockMvc.perform(get("/api/clientes")
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAdmin()))
@@ -351,7 +359,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve atualizar nome e email do cliente")
         void deveAtualizarNomeEEmailDoCliente() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Nome Antigo", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Nome Antigo", "52998224725"));
 
             String body = objectMapper.writeValueAsString(Map.of(
                     "nome",     "Nome Atualizado",
@@ -367,7 +375,7 @@ class ClienteControllerIntegrationTest {
                     .andExpect(jsonPath("$.nome",  is("Nome Atualizado")))
                     .andExpect(jsonPath("$.email", is("novo.email@test.com")));
 
-            Cliente atualizado = clienteRepository.findById(salvo.getId()).orElseThrow();
+            Cliente atualizado = clienteRepositorio.porId(salvo.getId()).orElseThrow();
             assertThat(atualizado.getNome()).isEqualTo("Nome Atualizado");
         }
 
@@ -384,7 +392,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("ADMIN também pode atualizar cliente")
         void adminTambemPodeAtualizarCliente() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Original", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Original", "52998224725"));
 
             mockMvc.perform(put("/api/clientes/" + salvo.getId())
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAdmin())
@@ -406,14 +414,14 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve desativar cliente — soft delete")
         void deveDesativarClienteSoftDelete() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Para Desativar", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Para Desativar", "52998224725"));
 
             mockMvc.perform(delete("/api/clientes/" + salvo.getId())
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAdmin()))
                     .andExpect(status().isNoContent());
 
-            Cliente inativo = clienteRepository.findById(salvo.getId()).orElseThrow();
-            assertThat(inativo.getAtivo()).isFalse();
+            Cliente inativo = clienteRepositorio.porId(salvo.getId()).orElseThrow();
+            assertThat(inativo.isAtivo()).isFalse();
         }
 
         @Test
@@ -427,7 +435,7 @@ class ClienteControllerIntegrationTest {
         @Test
         @DisplayName("deve retornar 403 quando ATENDENTE tenta desativar cliente")
         void deveRetornar403QuandoAtendenteTentaDesativarCliente() throws Exception {
-            Cliente salvo = clienteRepository.save(clientePF("Protegido", "52998224725"));
+            Cliente salvo = clienteRepositorio.salvar(clientePF("Protegido", "52998224725"));
 
             mockMvc.perform(delete("/api/clientes/" + salvo.getId())
                             .header("Authorization", "Bearer " + JwtTestUtils.tokenAtendente()))
@@ -463,22 +471,18 @@ class ClienteControllerIntegrationTest {
     }
 
     private ClientePF clientePF(String nome, String cpf) {
-        return ClientePF.builder()
-                .nome(nome)
-                .cpf(new CPF(cpf))
-                .email(nome.toLowerCase().replace(" ", ".") + "@test.com")
-                .telefone("85999990000")
-                .ativo(true)
-                .build();
+        return ClientePF.criar(nome, emailDe(nome), "85999990000", true, new CPF(cpf),
+                null, null, null);
     }
 
     private ClientePF clienteInativo(String nome, String cpf) {
-        return ClientePF.builder()
-                .nome(nome)
-                .cpf(new CPF(cpf))
-                .email(nome.toLowerCase().replace(" ", ".") + "@test.com")
-                .telefone("85999990001")
-                .ativo(false)
-                .build();
+        ClientePF cliente = ClientePF.criar(nome, emailDe(nome), "85999990001", true,
+                new CPF(cpf), null, null, null);
+        cliente.desativar();
+        return cliente;
+    }
+
+    private String emailDe(String nome) {
+        return nome.toLowerCase().replace(" ", ".") + "@test.com";
     }
 }

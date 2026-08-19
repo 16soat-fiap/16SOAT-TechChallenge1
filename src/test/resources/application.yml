@@ -1,36 +1,50 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Perfil "test" — Testes de integração com Testcontainers + PostgreSQL
+# Perfil de teste — testes de integração com Testcontainers + PostgreSQL real
 #
-# NÃO configura datasource aqui.
-# O @DynamicPropertySource em cada classe de teste injeta a URL/credenciais
-# do container em execução, sobrescrevendo qualquer valor estático.
+# NÃO configura datasource aqui: o @DynamicPropertySource de cada classe de teste
+# injeta URL/credenciais do container em execução.
 #
-# Vantagem: contexto Spring pode ser cacheado entre classes de teste
-# que usem o mesmo container (graças ao @Container static + withReuse).
+# O schema é criado pelas MESMAS migrations Flyway usadas em produção (V1 + V2).
+# Isso garante que os testes validem o schema real — incluindo as sequences
+# os_numero_seq, mecanico_seq e atendente_seq, das quais a numeração de OS e as
+# matrículas de funcionário dependem.
 # ─────────────────────────────────────────────────────────────────────────────
 
 spring:
   jpa:
-    # O Hibernate cria e dropa o schema a cada execução da suíte.
-    # Troque por "validate" se o projeto usar Flyway/Liquibase.
+    open-in-view: false
     hibernate:
-      ddl-auto: create-drop
-    show-sql: true
+      ddl-auto: none
+    show-sql: false
     properties:
       hibernate:
         format_sql: true
-        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
 
-  # Desativa o auto-configure de Flyway no perfil de teste
-  # para evitar conflito com ddl-auto: create-drop.
-  # Remova se o projeto já usar Flyway (ajuste o ddl-auto para "validate").
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  jackson:
+    time-zone: UTC
+
+  # O JwtDecoder real é substituído por SecurityTestConfig, que valida tokens
+  # assinados em memória pelo JwtTestUtils. Estes valores existem apenas para
+  # satisfazer a injeção de propriedades da SecurityConfig — nenhuma chamada HTTP
+  # ao Keycloak é feita nos testes.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://localhost:9999/realms/autopecas/protocol/openid-connect/certs
+          issuer-uri: http://localhost:9999/realms/autopecas
 
 keycloak:
   client-id: autopecas-api
   realm: autopecas
+  auth-server-url: http://localhost:9999
 
 logging:
   level:

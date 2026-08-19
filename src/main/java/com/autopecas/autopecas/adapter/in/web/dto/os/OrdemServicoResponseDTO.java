@@ -1,0 +1,20 @@
+package com.autopecas.autopecas.adapter.in.web.dto.os;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+public record OrdemServicoResponseDTO(
+        UUID id,
+        String numero,
+        String status,
+        String queixaCliente,
+        String diagnostico,
+        BigDecimal valorTotalAprovado,
+        LocalDateTime createdAt,
+        UUID clienteId,
+        String clienteNome,
+        UUID veiculoId,
+        String veiculoPlaca
+) {
+}

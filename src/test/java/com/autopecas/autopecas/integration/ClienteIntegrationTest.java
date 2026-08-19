@@ -1,8 +1,8 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePJDTO;
-import com.autopecas.autopecas.dto.cliente.ClienteUpdateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePFDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePJDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteUpdateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

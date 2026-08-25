@@ -5,6 +5,7 @@ import com.autopecas.autopecas.domain.exception.EstoqueInsuficienteException;
 import com.autopecas.autopecas.domain.exception.ResourceNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -49,6 +50,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleEstoqueInsuficiente(EstoqueInsuficienteException ex) {
         return ResponseEntity.status(HttpStatus.valueOf(UNPROCESSABLE_ENTITY))
                 .body(new ErrorResponse(UNPROCESSABLE_ENTITY, "Estoque insuficiente", ex.getMessage()));
+    }
+
+    /**
+     * Conflito de lock otimista: outra transação alterou o mesmo agregado. É 409, não 422 —
+     * o pedido não violou regra alguma, apenas chegou com dados que deixaram de ser atuais.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponse> handleConflito(OptimisticLockingFailureException ex) {
+        log.warn("Conflito de concorrência ao gravar", ex);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse(HttpStatus.CONFLICT.value(), "Conflito de concorrência",
+                        "O registro foi alterado por outra operação. "
+                                + "Recarregue os dados e tente novamente."));
     }
 
     @ExceptionHandler(BusinessException.class)

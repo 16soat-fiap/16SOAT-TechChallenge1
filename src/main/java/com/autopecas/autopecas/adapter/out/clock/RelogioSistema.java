@@ -7,7 +7,12 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 
 /**
- * Implementação da port Relogio sobre o relógio do sistema.
+ * Implementação da port Relogio sobre o relógio do sistema, em UTC.
+ *
+ * <p>UTC e não o fuso da máquina: o Jackson serializa em UTC e o Hibernate grava com
+ * {@code jdbc.time_zone: UTC}. Com o relógio no fuso local, as datas escritas pelo domínio
+ * (início de execução, finalização) sairiam deslocadas em relação às de auditoria geradas pelo
+ * próprio Hibernate no mesmo registro.
  *
  * <p>Recebe um java.time.Clock por construtor para que os testes possam fixar o tempo sem
  * precisar de mock estático.
@@ -18,7 +23,7 @@ public class RelogioSistema implements Relogio {
     private final Clock clock;
 
     public RelogioSistema() {
-        this(Clock.systemDefaultZone());
+        this(Clock.systemUTC());
     }
 
     public RelogioSistema(Clock clock) {

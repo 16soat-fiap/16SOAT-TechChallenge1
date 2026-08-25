@@ -1,0 +1,86 @@
+# =============================================================================
+# Horizontal Pod Autoscaler da API.
+#
+# Requisitos para funcionar:
+#   1. metrics-server instalado no cluster (o Terraform instala — ver
+#      infra/terraform/metrics-server.tf);
+#   2. `resources.requests` de CPU e memória declarados no Deployment, porque a
+#      utilização é calculada como uso/request.
+#
+# Verificar com:  kubectl get hpa -n autopecas -w
+# Se a coluna TARGETS mostrar <unknown>, o metrics-server ainda não coletou ou
+# não está de pé.
+#
+# ─── CPU comanda; memória é grade de proteção ────────────────────────────────
+# Medição feita neste projeto, em cluster kind, com carga real:
+#
+#   CPU     ocioso   2%   → sob carga 194%   (reage à demanda)
+#   Memória ociosa 419Mi  → sob carga 421Mi  (praticamente constante)
+#
+# A memória de uma JVM não acompanha a carga: o heap é reservado e liberado
+# pelo GC, não por requisição. Mais do que isso, ela NÃO CONVERGE como sinal de
+# autoscaling — acrescentar réplicas não reduz a memória por pod, porque cada
+# réplica nova também carrega o seu próprio heap. Se o alvo ficar abaixo do
+# consumo em regime permanente, o HPA sobe até maxReplicas e nunca volta.
+#
+# Daí a configuração: o alvo de memória (85%) fica bem acima do patamar normal
+# (~55% com o request de 768Mi), de modo que só dispare em pressão real —
+# vazamento, carga anômala — e não no dia a dia. Quem modula a frota é a CPU.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: autopecas-api
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: autopecas-api
+
+  minReplicas: 2
+  # Teto dimensionado para cluster local: cada réplica é uma JVM de ~420Mi, e
+  # 6 delas junto com Keycloak e Postgres já saturam uma máquina de
+  # desenvolvimento. Em cluster real, com nós dedicados, este número sobe.
+  maxReplicas: 5
+
+  metrics:
+    # 70% deixa espaço para absorver um pico enquanto os pods novos sobem — o
+    # startup da JVM não é instantâneo, então mirar em 90% chegaria tarde.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Grade de proteção, não motor de escalonamento — ver o comentário no topo.
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 85
+
+  behavior:
+    scaleUp:
+      # Reage à subida de carga sem dobrar a frota de uma vez: subir 2 pods a
+      # cada 60s dá tempo de a JVM nova entrar em serviço e a métrica refletir
+      # o alívio, evitando escalar além do necessário.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      # Desce devagar: 5 minutos de janela evitam o vai-e-vem de réplicas
+      # (flapping) quando a carga oscila, e cada pod novo custa o startup da JVM.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

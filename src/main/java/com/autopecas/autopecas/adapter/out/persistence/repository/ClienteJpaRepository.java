@@ -4,10 +4,13 @@ import com.autopecas.autopecas.adapter.out.persistence.entity.ClienteJpaEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Repositório Spring Data da hierarquia de clientes. */
 public interface ClienteJpaRepository extends JpaRepository<ClienteJpaEntity, UUID> {
 
     List<ClienteJpaEntity> findByAtivoTrue();
+
+    Optional<ClienteJpaEntity> findByEmailIgnoreCaseAndAtivoTrue(String email);
 }

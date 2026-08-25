@@ -1,0 +1,18 @@
+# O state contém, em texto claro, tudo que foi provisionado — inclusive o
+# conteúdo dos Secrets e a senha do banco. Nunca versionar.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+
+# Valores locais; use terraform.tfvars.example como modelo
+terraform.tfvars
+*.auto.tfvars
+
+# kubeconfig escrito pelo provider kind — contém credenciais de admin do cluster
+*-config
+kubeconfig*

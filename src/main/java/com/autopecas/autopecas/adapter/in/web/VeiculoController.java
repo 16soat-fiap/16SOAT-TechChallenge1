@@ -42,8 +42,10 @@ public class VeiculoController {
                 .map(mapper::paraResposta).toList());
     }
 
+    // CLIENTE só enxerga veículo do próprio cadastro
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehDonoDoVeiculo(authentication, #id)")
     public ResponseEntity<VeiculoResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeVeiculos.porId(id)));
     }
@@ -54,9 +56,10 @@ public class VeiculoController {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeVeiculos.porPlaca(placa)));
     }
 
-    // CLIENTE pode listar os próprios veículos filtrando pelo seu clienteId
+    // CLIENTE pode listar os próprios veículos — o clienteId precisa ser o dele
     @GetMapping("/cliente/{clienteId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehOProprioCliente(authentication, #clienteId)")
     public ResponseEntity<List<VeiculoResponseDTO>> listarPorCliente(@PathVariable UUID clienteId) {
         return ResponseEntity.ok(gestaoDeVeiculos.doCliente(clienteId).stream()
                 .map(mapper::paraResposta).toList());

@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -49,7 +50,10 @@ public class OrdemServicoController {
         this.paginacaoMapper = paginacaoMapper;
     }
 
+    // O CLIENTE só enxerga a listagem filtrada pelo próprio clienteId
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
+            + "or @propriedade.ehOProprioCliente(authentication, #clienteId)")
     public ResponseEntity<Page<OrdemServicoResponseDTO>> listar(
             @RequestParam(required = false) StatusOS status,
             @RequestParam(required = false) UUID clienteId,
@@ -61,11 +65,15 @@ public class OrdemServicoController {
     }
 
     @GetMapping("/{numero}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
+            + "or @propriedade.ehDonoDaOrdemServicoPorNumero(authentication, #numero)")
     public ResponseEntity<OrdemServicoResponseDTO> buscarPorNumero(@PathVariable String numero) {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeOrdensServico.porNumero(numero)));
     }
 
+    // Abrir OS é ato de recepção — quem recebe o veículo é o atendente
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<OrdemServicoResponseDTO> criar(
             @Valid @RequestBody OrdemServicoCreateDTO dto,
             Authentication authentication) {
@@ -77,6 +85,7 @@ public class OrdemServicoController {
     }
 
     @PatchMapping("/{id}/status")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO')")
     public ResponseEntity<OrdemServicoResponseDTO> avancarStatus(
             @PathVariable UUID id,
             @Valid @RequestBody AvancarStatusDTO dto,
@@ -86,7 +95,9 @@ public class OrdemServicoController {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeOrdensServico.avancarStatus(id, comando)));
     }
 
+    // O diagnóstico é técnico: quem registra é o mecânico
     @PatchMapping("/{id}/diagnostico")
+    @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<OrdemServicoResponseDTO> registrarDiagnostico(
             @PathVariable UUID id,
             @Valid @RequestBody DiagnosticoDTO dto) {
@@ -95,6 +106,7 @@ public class OrdemServicoController {
     }
 
     @PatchMapping("/{id}/mecanico")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<OrdemServicoResponseDTO> atribuirMecanico(
             @PathVariable UUID id,
             @Valid @RequestBody AtribuirMecanicoDTO dto) {

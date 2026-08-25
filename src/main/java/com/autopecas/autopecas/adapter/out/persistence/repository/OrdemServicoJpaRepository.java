@@ -4,9 +4,11 @@ import com.autopecas.autopecas.adapter.out.persistence.entity.OrdemServicoJpaEnt
 import com.autopecas.autopecas.adapter.out.persistence.projection.ExecucaoConcluida;
 import com.autopecas.autopecas.adapter.out.persistence.projection.OrdemServicoResumo;
 import com.autopecas.autopecas.domain.enums.StatusOS;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -36,6 +38,18 @@ public interface OrdemServicoJpaRepository extends JpaRepository<OrdemServicoJpa
             """;
 
     String COUNT_RESUMO = "SELECT COUNT(os) FROM OrdemServicoJpaEntity os";
+
+    /**
+     * Carrega a OS para escrita forçando o incremento da versão no commit.
+     *
+     * <p>Como o agregado de domínio é destacado da entidade JPA, o adapter recarrega a linha
+     * antes de gravar — e uma comparação de versões seria enganosa, porque um flush intermediário
+     * na mesma transação já teria avançado a versão. FORCE_INCREMENT resolve no lugar certo: o
+     * conflito é detectado pelo banco, entre transações, no commit.
+     */
+    @Lock(LockModeType.OPTIMISTIC_FORCE_INCREMENT)
+    @Query("SELECT os FROM OrdemServicoJpaEntity os WHERE os.id = :id")
+    Optional<OrdemServicoJpaEntity> porIdParaAtualizacao(@Param("id") UUID id);
 
     Optional<OrdemServicoJpaEntity> findByNumero(String numero);
 

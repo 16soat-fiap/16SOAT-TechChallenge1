@@ -14,8 +14,15 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 - [Modelo de Domínio](#-modelo-de-domínio)
 - [Segurança e Controle de Acesso](#-segurança-e-controle-de-acesso)
 - [Endpoints da API](#-endpoints-da-api)
-- [Infraestrutura (Docker)](#-infraestrutura-docker)
-- [Como Executar](#-como-executar)
+- [Infraestrutura e Execução](#-infraestrutura-e-execução)
+  - [Pré-requisitos](#pré-requisitos)
+  - [Containerização (Docker)](#containerização-docker)
+  - [Provisionamento (Terraform)](#provisionamento-terraform)
+  - [Orquestração (Kubernetes)](#orquestração-kubernetes)
+  - [Passo a passo completo](#passo-a-passo-completo)
+  - [Autoscaling](#autoscaling-como-verificar)
+  - [Segredos em produção](#segredos-em-produção)
+  - [Operação e diagnóstico](#operação-e-diagnóstico)
 - [Testes e Cobertura](#-testes-e-cobertura)
 - [Análise de Qualidade (SonarQube)](#-análise-de-qualidade-sonarqube)
 - [Variáveis de Ambiente](#-variáveis-de-ambiente)
@@ -39,7 +46,9 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 | Fronteiras de Arquitetura    | ArchUnit 1.3.0 (11 regras, quebram a build)             |
 | Cobertura de Código          | JaCoCo 0.8.12 (mínimo 80% de linhas)                   |
 | Análise de Qualidade         | SonarQube (Community Edition)                           |
-| Containerização              | Docker + Docker Compose                                 |
+| Containerização              | Docker (build em 3 estágios) + Docker Compose           |
+| Orquestração                 | Kubernetes — Deployments, Services, ConfigMap/Secrets, HPA |
+| Infraestrutura como Código   | Terraform (kind + PostgreSQL + metrics-server)          |
 
 ---
 
@@ -134,7 +143,7 @@ src/main/java/com/autopecas/autopecas/
 │       └── tx/                      # TransacaoSpring
 │
 ├── config/                          # UseCaseConfig (wiring), SecurityConfig, OpenApiConfig
-└── security/                        # KeycloakJwtAuthConverter
+└── security/                        # KeycloakJwtAuthConverter, PropriedadeDoRecurso
 
 src/test/java/com/autopecas/autopecas/
 ├── arquitetura/                     # ArquiteturaHexagonalTest — fronteiras como teste
@@ -143,6 +152,33 @@ src/test/java/com/autopecas/autopecas/
 │   ├── fake/                        # Fakes das ports (TransacaoDireta, RelogioFixo, geradores)
 │   └── usecase/                     # Testes de caso de uso contra dublês das ports
 └── integration/                     # Testcontainers + PostgreSQL real (schema via Flyway)
+```
+
+Infraestrutura (detalhada na seção [Infraestrutura e Execução](#-infraestrutura-e-execução)):
+
+```
+Dockerfile                           # build em 3 estágios, JAR em camadas
+docker-compose.yml                   # stack local; SonarQube atrás do profile `qa`
+docker/postgres/                     # script que cria o keycloak_db no 1º boot
+keycloak/realm-export.json           # realm — fonte única, usada por Compose e K8s
+
+infra/
+├── k8s/                             # aplicado com `kubectl apply -f infra/k8s/`
+│   ├── 00-namespace.yaml
+│   ├── 10-configmap-app.yaml        # configuração não sensível
+│   ├── 11-secret-app.yaml           # credenciais (valores de desenvolvimento)
+│   ├── 20-keycloak.yaml             # Deployment + Service + NodePort
+│   ├── 30-app-deployment.yaml       # Deployment + Service + NodePort + PDB
+│   └── 40-app-hpa.yaml              # HPA: CPU 70% / memória 85%, 2–5 réplicas
+│
+└── terraform/                       # provisiona o que precede a aplicação
+    ├── versions.tf                  # providers kind, kubernetes, helm
+    ├── cluster.tf                   # cluster kind + namespace
+    ├── database.tf                  # PostgreSQL (StatefulSet + PVC + Service)
+    ├── keycloak-realm.tf            # ConfigMap do realm, lido do arquivo único
+    ├── metrics-server.tf            # pré-requisito do HPA
+    ├── variables.tf / outputs.tf
+    └── terraform.tfvars.example
 ```
 
 ---
@@ -207,11 +243,70 @@ A autenticação é feita via **JWT emitido pelo Keycloak**. A aplicação atua 
 | `MECANICO`  | Consulta serviços e peças disponíveis                                             |
 | `CLIENTE`   | Consulta o próprio cadastro, veículos próprios, OS e orçamentos das suas OS       |
 
+### Propriedade do recurso
+
+A role `CLIENTE` diz apenas *"é um cliente"*, não *"é o dono deste registro"*. Por isso, nos
+endpoints marcados com † nas tabelas abaixo, a autorização soma à role uma **checagem de
+propriedade**: `@PreAuthorize` chama o bean `@propriedade`, que resolve o cadastro do usuário
+autenticado e compara com o dono do recurso.
+
+O vínculo entre o usuário do Keycloak e o cadastro é o **e-mail**: o claim `email` do token é
+casado com `clientes.email` (coluna `UNIQUE`), considerando apenas clientes ativos. Um cliente
+cadastrado com e-mail diferente do que usa no Keycloak não consegue acessar os próprios dados —
+é o custo de não haver um identificador federado explícito no schema.
+
+Quem extrai o e-mail do token é o `KeycloakJwtAuthConverter`, que define o nome do principal
+como `email` → `preferred_username` → `sub` (nessa ordem de preferência).
+
+#### Como reproduzir o teste de propriedade
+
+O realm importado traz apenas `test_user` (ADMIN). Para exercitar a role `CLIENTE` é preciso
+criar um usuário cujo e-mail case com um cliente cadastrado:
+
+```bash
+ADMIN=$(curl -s -X POST "http://localhost:9080/realms/autopecas/protocol/openid-connect/token"   -H "Content-Type: application/x-www-form-urlencoded"   -d "grant_type=password" -d "client_id=autopecas-api"   -d "username=test_user" -d "password=1234" | jq -r .access_token)
+
+# 1. Cadastrar o cliente pela API
+curl -s -X POST http://localhost:8080/api/clientes/pf   -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/json"   -d '{"nome":"Cliente A","email":"cliente.a@autopecas.com","telefone":"11999990001",
+       "aceitaNotificacoes":true,"cpf":"52998224725","dataNascimento":"1990-01-01"}'
+
+# 2. Criar o usuário no Keycloak com o MESMO e-mail
+KCADM=$(curl -s -X POST "http://localhost:9080/realms/master/protocol/openid-connect/token"   -H "Content-Type: application/x-www-form-urlencoded"   -d "grant_type=password" -d "client_id=admin-cli"   -d "username=admin" -d "password=admin" | jq -r .access_token)
+
+curl -s -X POST "http://localhost:9080/admin/realms/autopecas/users"   -H "Authorization: Bearer $KCADM" -H "Content-Type: application/json"   -d '{"username":"cliente.a","email":"cliente.a@autopecas.com","emailVerified":true,
+       "firstName":"Cliente","lastName":"A","enabled":true,
+       "credentials":[{"type":"password","value":"1234","temporary":false}]}'
+```
+
+Depois atribua ao usuário os roles **`CLIENTE`** e **`default-roles-autopecas`** (via console em
+`Users → Role mapping`, ou pela API em `/users/{id}/role-mappings/realm`).
+
+> Duas armadilhas ao criar o usuário pela API, ambas resultando em
+> `invalid_grant: Account is not fully set up` na hora de pedir o token:
+> **`firstName`/`lastName` são obrigatórios** (o realm tem a required action *Verify Profile*), e
+> **`default-roles-autopecas` não é atribuído automaticamente**. Pelo console os dois já vêm
+> resolvidos.
+
+#### Resultado verificado
+
+Com o `Cliente A` autenticado, contra um `Cliente B` cadastrado no mesmo banco:
+
+| Requisição | Esperado | Obtido |
+|---|---|---|
+| `GET /api/clientes/{id-do-A}` | 200 | ✅ 200 |
+| `GET /api/clientes/{id-do-B}` | 403 | ✅ 403 |
+| `GET /api/clientes` (lista) | 403 | ✅ 403 |
+| `GET /api/veiculos/cliente/{id-do-A}` | 200 | ✅ 200 |
+| `GET /api/veiculos/cliente/{id-do-B}` | 403 | ✅ 403 |
+| `POST /api/ordens-servico` | 403 | ✅ 403 |
+| `GET /api/dashboard` | 403 | ✅ 403 |
+
 ### Keycloak (ambiente Docker)
 - **URL:** `http://localhost:9080`
 - **Usuário admin:** `admin` / `admin`
-- **Realm:** `app-realm` (importado automaticamente via `keycloak/realm-export.json`)
-- **Issuer URI:** `http://keycloak:8080/realms/app-realm`
+- **Realm:** `autopecas` (importado automaticamente via `keycloak/realm-export.json`)
+- **Issuer URI (validação do token):** `http://localhost:9080/realms/autopecas`
+- **JWKS (rede interna do Compose):** `http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs`
 
 ---
 
@@ -287,24 +382,28 @@ A documentação interativa completa está disponível via Swagger após subir a
 | Método   | Endpoint                        | Roles                            | Descrição                          |
 |----------|---------------------------------|----------------------------------|------------------------------------|
 | `GET`    | `/api/clientes`                 | `ADMIN`, `ATENDENTE`             | Lista todos os clientes            |
-| `GET`    | `/api/clientes/{id}`            | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Busca cliente por ID               |
+| `GET`    | `/api/clientes/{id}`            | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Busca cliente por ID               |
 | `GET`    | `/api/clientes/buscarDOC?documento=` | `ADMIN`, `ATENDENTE`        | Busca por CPF/CNPJ                 |
 | `POST`   | `/api/clientes/pf`              | `ADMIN`, `ATENDENTE`             | Cadastra cliente Pessoa Física     |
 | `POST`   | `/api/clientes/pj`              | `ADMIN`, `ATENDENTE`             | Cadastra cliente Pessoa Jurídica   |
 | `PUT`    | `/api/clientes/{id}`            | `ADMIN`, `ATENDENTE`             | Atualiza dados do cliente          |
 | `DELETE` | `/api/clientes/{id}`            | `ADMIN`                          | Desativa cliente                   |
 
+† Somente o próprio cadastro do `CLIENTE` autenticado.
+
 ### Veículos — `/api/veiculos`
 
 | Método   | Endpoint                             | Roles                            | Descrição                          |
 |----------|--------------------------------------|----------------------------------|------------------------------------|
 | `GET`    | `/api/veiculos`                      | `ADMIN`, `ATENDENTE`             | Lista todos os veículos            |
-| `GET`    | `/api/veiculos/{id}`                 | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Busca veículo por ID               |
+| `GET`    | `/api/veiculos/{id}`                 | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Busca veículo por ID               |
 | `GET`    | `/api/veiculos/placa/{placa}`        | `ADMIN`, `ATENDENTE`             | Busca veículo por placa            |
-| `GET`    | `/api/veiculos/cliente/{clienteId}`  | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Lista veículos de um cliente       |
+| `GET`    | `/api/veiculos/cliente/{clienteId}`  | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Lista veículos de um cliente       |
 | `POST`   | `/api/veiculos`                      | `ADMIN`, `ATENDENTE`             | Cadastra veículo                   |
 | `PUT`    | `/api/veiculos/{id}`                 | `ADMIN`, `ATENDENTE`             | Atualiza veículo                   |
 | `DELETE` | `/api/veiculos/{id}`                 | `ADMIN`                          | Remove veículo                     |
+
+† Somente veículos do próprio `CLIENTE` autenticado.
 
 ### Funcionários — `/api/funcionarios`
 
@@ -340,24 +439,29 @@ A documentação interativa completa está disponível via Swagger após subir a
 
 ### Ordens de Serviço — `/api/ordens-servico`
 
-| Método  | Endpoint                                | Roles        | Descrição                                                    |
-|---------|-----------------------------------------|--------------|--------------------------------------------------------------|
-| `GET`   | `/api/ordens-servico`                   | Autenticado  | Lista OS (filtros: `status`, `clienteId`, `mecanicoId`, paginação) |
-| `GET`   | `/api/ordens-servico/{numero}`          | Autenticado  | Busca OS pelo número                                         |
-| `POST`  | `/api/ordens-servico`                   | Autenticado  | Cria nova OS                                                 |
-| `PATCH` | `/api/ordens-servico/{id}/status`       | Autenticado  | Avança o status da OS                                        |
-| `PATCH` | `/api/ordens-servico/{id}/diagnostico`  | Autenticado  | Registra diagnóstico na OS                                   |
-| `PATCH` | `/api/ordens-servico/{id}/mecanico`     | Autenticado  | Atribui mecânico à OS                                        |
+| Método  | Endpoint                                | Roles                                          | Descrição                                                    |
+|---------|-----------------------------------------|------------------------------------------------|--------------------------------------------------------------|
+| `GET`   | `/api/ordens-servico`                   | `ADMIN`, `ATENDENTE`, `MECANICO`, `CLIENTE`†  | Lista OS (filtros: `status`, `clienteId`, `mecanicoId`, paginação) |
+| `GET`   | `/api/ordens-servico/{numero}`          | `ADMIN`, `ATENDENTE`, `MECANICO`, `CLIENTE`†  | Busca OS pelo número                                         |
+| `POST`  | `/api/ordens-servico`                   | `ADMIN`, `ATENDENTE`                           | Cria nova OS                                                 |
+| `PATCH` | `/api/ordens-servico/{id}/status`       | `ADMIN`, `ATENDENTE`, `MECANICO`               | Avança o status da OS                                        |
+| `PATCH` | `/api/ordens-servico/{id}/diagnostico`  | `ADMIN`, `MECANICO`                            | Registra diagnóstico na OS                                   |
+| `PATCH` | `/api/ordens-servico/{id}/mecanico`     | `ADMIN`, `ATENDENTE`                           | Atribui mecânico à OS                                        |
+
+† O `CLIENTE` só acessa a OS que é dele: na listagem, apenas com `clienteId` igual ao seu; na
+busca por número, apenas se a OS for do seu cadastro.
 
 ### Orçamentos — `/api/ordens-servico/{osId}/orcamentos`
 
 | Método  | Endpoint                                               | Roles                            | Descrição                    |
 |---------|--------------------------------------------------------|----------------------------------|------------------------------|
-| `POST`  | `/api/ordens-servico/{osId}/orcamentos`                | `ADMIN`, `ATENDENTE`             | Cria orçamento para a OS     |
-| `GET`   | `/api/ordens-servico/{osId}/orcamentos`                | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Lista orçamentos da OS       |
-| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/enviar`    | `ADMIN`, `ATENDENTE`             | Envia orçamento ao cliente   |
-| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/aprovar`   | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Aprova orçamento             |
-| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/rejeitar`  | `ADMIN`, `ATENDENTE`, `CLIENTE`  | Rejeita orçamento            |
+| `POST`  | `/api/ordens-servico/{osId}/orcamentos`                | `ADMIN`, `ATENDENTE`              | Cria orçamento para a OS     |
+| `GET`   | `/api/ordens-servico/{osId}/orcamentos`                | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Lista orçamentos da OS       |
+| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/enviar`    | `ADMIN`, `ATENDENTE`              | Envia orçamento ao cliente   |
+| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/aprovar`   | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Aprova orçamento             |
+| `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/rejeitar`  | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Rejeita orçamento            |
+
+† Somente o `CLIENTE` dono da OS informada em `{osId}`.
 
 ### Dashboard — `/api/dashboard`
 
@@ -368,76 +472,532 @@ A documentação interativa completa está disponível via Swagger após subir a
 
 ---
 
-## 🐳 Infraestrutura (Docker)
+## 🐳 Infraestrutura e Execução
 
-O `docker-compose.yml` orquestra 5 serviços:
-
-| Serviço          | Imagem                         | Porta  | Descrição                                |
-|------------------|--------------------------------|--------|------------------------------------------|
-| `postgres`       | `postgres:16-alpine`           | `5432` | Banco da aplicação e do Keycloak         |
-| `postgres_sonar` | `postgres:16-alpine`           | —      | Banco exclusivo do SonarQube             |
-| `sonarqube`      | `sonarqube:community`          | `9000` | Análise estática de código               |
-| `keycloak`       | `keycloak/keycloak:24.0.0`     | `9080` | Identity Provider (IdP) com realm pronto |
-| `app`            | Build local (`Dockerfile`)     | `8080` | Aplicação Spring Boot                    |
-
-### Dockerfile (Multi-stage Build)
+### Visão geral
 
 ```
-Stage 1 (build): maven:3.9-eclipse-temurin-21
-  └── mvn clean package -DskipTests
-
-Stage 2 (runtime): eclipse-temurin:21-jre
-  └── Usuário não-root (appuser)
-  └── JVM otimizada para container (-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0)
+                        máquina host
+  ┌──────────────────────────────────────────────────────────────┐
+  │  localhost:8080 ──┐                    localhost:9080 ──┐    │
+  └───────────────────┼───────────────────────────────────┼──────┘
+                      │  (extraPortMapping do kind)       │
+  ┌───────────────────▼───────────────────────────────────▼──────┐
+  │  cluster kind "autopecas"          1 control-plane + 2 workers│
+  │                                                               │
+  │  ┌──────────────── namespace: autopecas ────────────────────┐ │
+  │  │                                                          │ │
+  │  │   NodePort 30080          NodePort 30081                 │ │
+  │  │        │                       │                         │ │
+  │  │        ▼                       ▼                         │ │
+  │  │  ┌───────────┐  ◄── HPA   ┌──────────┐                   │ │
+  │  │  │autopecas- │  2..5      │ keycloak │  (1 réplica)      │ │
+  │  │  │   api     │  réplicas  │          │                   │ │
+  │  │  └─────┬─────┘            └────┬─────┘                   │ │
+  │  │        │      ┌────────────────┘                         │ │
+  │  │        ▼      ▼                                          │ │
+  │  │  ┌──────────────────┐                                    │ │
+  │  │  │ postgres (STS)   │  app_db + keycloak_db              │ │
+  │  │  │   └── PVC 2Gi    │                                    │ │
+  │  │  └──────────────────┘                                    │ │
+  │  └──────────────────────────────────────────────────────────┘ │
+  │  kube-system: metrics-server  ──alimenta──►  HPA              │
+  └───────────────────────────────────────────────────────────────┘
 ```
+
+### Divisão de responsabilidades
+
+A fronteira entre Terraform e manifestos segue o que muda em que ritmo:
+
+| Camada | O que provisiona | Por quê |
+|---|---|---|
+| **Terraform** (`infra/terraform/`) | Cluster, namespace, PostgreSQL, metrics-server, ConfigMap do realm | Infraestrutura de base — muda raramente e precisa existir antes da aplicação |
+| **Manifestos** (`infra/k8s/`) | Deployments, Services, ConfigMap, Secrets, HPA, PDB | Aplicação — muda a cada release, aplicado por `kubectl` ou por um pipeline |
+
+Essa separação é o que permite dar `kubectl apply` cem vezes ao dia sem tocar no Terraform.
+
+> **Sobreposição intencional:** o namespace é declarado nos dois lados. O Terraform precisa
+> dele para criar o banco; os manifestos precisam dele para funcionar num cluster que não veio
+> deste Terraform. Aplicar ambos é idempotente.
 
 ---
-
-## 🚀 Como Executar
 
 ### Pré-requisitos
 
-- JDK 21+
-- Maven 3.9+
-- Docker Engine + Docker Compose v2
-
-### 1. Clonar o repositório
+| Ferramenta | Versão | Necessário para |
+|---|---|---|
+| Docker Engine | 24+ | Tudo — o kind roda os nós como containers |
+| Docker Compose | v2 | Ambiente local sem Kubernetes |
+| Terraform | 1.5+ | Provisionar o cluster e o banco |
+| kubectl | 1.29+ | Aplicar os manifestos |
+| kind | 0.23+ | Instalado pelo provider Terraform, mas o CLI é usado no `kind load` |
 
 ```bash
-git clone <repository-url>
-cd 16SOAT-TechChallenge1
+# Windows (winget)
+winget install Hashicorp.Terraform Kubernetes.kubectl Kubernetes.kind
+
+# macOS (brew)
+brew install terraform kubectl kind
 ```
 
-### 2. Subir toda a infraestrutura com a aplicação
+#### Sem instalar nada: Terraform via container
+
+Terraform e kind podem rodar em container, com o Docker do host. Útil em máquina onde não se
+quer instalar as ferramentas — foi assim que este ambiente foi validado.
+
+O provider kind **executa o binário `docker`** (não fala com a API diretamente), então a imagem
+precisa do docker CLI e do socket montado:
 
 ```bash
-docker-compose up --build -d
+# Imagem auxiliar: terraform + docker CLI
+cat > Dockerfile.tf <<EOF
+FROM hashicorp/terraform:1.9
+RUN apk add --no-cache docker-cli kubectl bash
+ENTRYPOINT []
+EOF
+docker build -f Dockerfile.tf -t tf-runner:local .
+
+# 1ª etapa — criar o cluster (não precisa dos providers kubernetes/helm)
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo"   -w /repo/infra/terraform tf-runner:local   sh -c "terraform init && terraform apply -auto-approve -target=kind_cluster.autopecas"
 ```
 
-Aguarde os health checks passarem. A ordem de inicialização é gerenciada automaticamente:  
-`postgres` → `keycloak` → `app`
-
-### 3. Verificar os serviços
-
-| Serviço    | URL                                   |
-|------------|---------------------------------------|
-| API        | http://localhost:8080                 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
-| Keycloak   | http://localhost:9080                 |
-| SonarQube  | http://localhost:9000                 |
-
-### 4. Executar apenas a infraestrutura (para desenvolvimento local)
+A 2ª etapa tem um detalhe: o kubeconfig escrito pelo kind aponta para `127.0.0.1:<porta>`, que
+**dentro de um container é o próprio container**, não o host. Gere uma variante apontando para
+`host.docker.internal` e passe-a em `kubeconfig_path_override`:
 
 ```bash
-# Sobe apenas postgres, keycloak e sonarqube (sem o app)
-docker-compose up postgres keycloak sonarqube -d
+sed -e "s#server: https://127.0.0.1:#server: https://host.docker.internal:#"     -e "s#certificate-authority-data:.*#insecure-skip-tls-verify: true#"     infra/terraform/autopecas-config > /tmp/kubeconfig-container.yaml
 
-# Rode a aplicação com o profile dev
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo"   -v /tmp/kubeconfig-container.yaml:/kube/config:ro   -w /repo/infra/terraform tf-runner:local   sh -c "terraform apply -auto-approve -var kubeconfig_path_override=/kube/config"
+```
+
+O `insecure-skip-tls-verify` é aceitável aqui porque o certificado do API server não inclui
+`host.docker.internal` nos SANs, e o tráfego não sai da máquina.
+
+#### Carregar a imagem sem o CLI do kind
+
+`kind load` apenas importa a imagem no containerd de cada nó — o que se faz direto:
+
+```bash
+docker save autopecas-api:local -o /tmp/app-image.tar
+for n in autopecas-control-plane autopecas-worker autopecas-worker2; do
+  docker exec -i "$n" ctr --namespace=k8s.io images import --all-platforms - < /tmp/app-image.tar
+done
+```
+
+> Envie o tar por **stdin**, não via `docker cp` para `/tmp`: nos nós kind o `/tmp` é um tmpfs
+> que sombreia o arquivo copiado — o `cp` retorna sucesso e o arquivo não aparece.
+
+#### Memória necessária
+
+Reserve **~8 GB de RAM** para o Docker. O consumo medido, em regime permanente:
+
+| Componente | Memória |
+|---|---|
+| API (por réplica) | ~420 Mi |
+| Keycloak | ~543 Mi |
+| PostgreSQL | ~79 Mi |
+| 3 nós kind + control-plane | ~1,5 GB |
+
+Com o HPA em `maxReplicas: 5`, o pico fica em torno de 5 GB. **Não aumente `maxReplicas` em
+cluster local**: durante os testes, 6 réplicas somadas ao Keycloak saturaram a máquina, e no
+reinício seguinte o boot simultâneo de todos os pods travou o próprio engine do Docker.
+
+---
+
+### Containerização (Docker)
+
+#### Dockerfile
+
+Build em três estágios:
+
+1. **build** — `maven:3.9-eclipse-temurin-21` compila o JAR. O `pom.xml` é copiado antes do
+   `src/` para que alterar código não invalide a camada de download das dependências.
+2. **layers** — explode o JAR com `-Djarmode=tools extract --layers`, separando bibliotecas
+   (mudam pouco) do código da aplicação (muda sempre). Sem isso, cada `docker push` reenviaria
+   ~60 MB de dependências.
+3. **runtime** — `eclipse-temurin:21-jre`, usuário não-root `appuser`, camadas copiadas na
+   ordem da que menos muda para a que mais muda.
+
+Flags da JVM e o motivo de cada uma:
+
+| Flag | Motivo |
+|---|---|
+| `-XX:+UseContainerSupport` | A JVM lê os limites do cgroup em vez da memória da máquina |
+| `-XX:MaxRAMPercentage=75` | Heap proporcional ao `limits.memory` do pod |
+| `-XX:+ExitOnOutOfMemoryError` | No OOM o processo morre e o orquestrador reinicia, em vez de ficar de pé e degradado |
+| `-Duser.timezone=UTC` | Alinha o `@CreationTimestamp` do Hibernate (fuso da JVM) com o `Relogio` da aplicação |
+
+```bash
+docker build -t autopecas-api:local .
+```
+
+#### docker-compose (desenvolvimento local)
+
+```bash
+docker compose up -d --build          # postgres + keycloak + app
+docker compose --profile qa up -d     # sobe também o SonarQube
+docker compose logs -f app
+docker compose down                   # -v também apaga os volumes
+```
+
+| Serviço | URL | Observação |
+|---|---|---|
+| API | http://localhost:8080 | Swagger em `/swagger-ui.html` |
+| Keycloak | http://localhost:9080 | `admin` / `admin` |
+| SonarQube | http://localhost:9000 | Só com `--profile qa` |
+
+Duas mudanças em relação à versão anterior do Compose:
+
+- **SonarQube atrás de um profile.** Antes, todo `up` levantava dois bancos e uma JVM extra de
+  ~2 GB só para ter o Sonar disponível — que só é necessário ao rodar a análise.
+- **Banco do Keycloak separado.** Os dois compartilhavam `app_db`. Como a aplicação agora roda
+  em `prod` com `ddl-auto: validate`, o Hibernate passaria a inspecionar um schema cheio de
+  tabelas do Keycloak. O script `docker/postgres/init-keycloak-db.sh` cria `keycloak_db` no
+  primeiro boot do volume.
+
+> Se você já tinha o volume `postgres_data` da versão anterior, o script de init **não roda**
+> (ele só executa em volume vazio). Rode `docker compose down -v` para recriar.
+
+---
+
+### Provisionamento (Terraform)
+
+```bash
+cd infra/terraform
+
+terraform init
+
+# Primeiro apply em duas etapas — ver nota abaixo
+terraform apply -target=kind_cluster.autopecas
+terraform apply
+```
+
+> **Por que duas etapas na primeira vez:** os providers `kubernetes` e `helm` são configurados
+> a partir do kubeconfig que o `kind_cluster` escreve. Terraform precisa resolver a configuração
+> do provider durante o *plan*, quando o arquivo ainda não existe. É uma limitação conhecida de
+> providers configurados a partir de recursos do mesmo plano. Applies seguintes rodam em um
+> comando só.
+
+#### Variáveis principais
+
+| Variável | Default | Descrição |
+|---|---|---|
+| `cluster_name` | `autopecas` | Nome do cluster kind |
+| `node_image` | `kindest/node:v1.31.0` | Fixa a versão do Kubernetes |
+| `worker_count` | `2` | Nós worker (1–5) |
+| `app_host_port` | `8080` | Porta do host → NodePort 30080 |
+| `keycloak_host_port` | `9080` | Porta do host → NodePort 30081 |
+| `postgres_storage` | `2Gi` | Volume do banco |
+| `postgres_password` | `postgres` | Prefira `TF_VAR_postgres_password` |
+| `install_metrics_server` | `true` | Desligue só se o cluster já tiver um |
+
+Copie `terraform.tfvars.example` para `terraform.tfvars` para sobrescrever.
+
+---
+
+### Recursos criados pelo Terraform
+
+| Arquivo | Recurso | O que é |
+|---|---|---|
+| `cluster.tf` | `kind_cluster.autopecas` | Cluster com 1 control-plane + N workers. Mapeia as portas 30080/30081 do nó para 8080/9080 do host |
+| `cluster.tf` | `kubernetes_namespace.autopecas` | Namespace `autopecas` com Pod Security Standards em `baseline` |
+| `database.tf` | `kubernetes_secret.postgres` | Usuário, senha e nome do banco |
+| `database.tf` | `kubernetes_config_map.postgres_init` | Script que cria `keycloak_db` no primeiro boot |
+| `database.tf` | `kubernetes_stateful_set.postgres` | PostgreSQL 16 com PVC de 2 Gi e probes `pg_isready` |
+| `database.tf` | `kubernetes_service.postgres` | Service headless na porta 5432 |
+| `keycloak-realm.tf` | `kubernetes_config_map.keycloak_realm` | Realm importado no boot do Keycloak |
+| `metrics-server.tf` | `helm_release.metrics_server` | metrics-server no `kube-system` — **pré-requisito do HPA** |
+
+**Por que StatefulSet e não Deployment para o banco:** o Postgres tem identidade e disco. O
+StatefulSet garante nome estável (`postgres-0`) e liga o pod sempre ao mesmo PVC; um Deployment
+poderia recriar o pod apontando para outro volume.
+
+**Por que o realm fica no Terraform:** o `realm-export.json` tem ~70 KB e é o mesmo arquivo que
+o Compose monta. Lido com `file()`, Compose e Kubernetes consomem a mesma fonte e não divergem.
+O kustomize não serviria porque se recusa a ler arquivos fora do diretório da kustomization.
+
+---
+
+### Orquestração (Kubernetes)
+
+```bash
+# 1. A imagem precisa estar DENTRO do cluster — kind não usa registry
+kind load docker-image autopecas-api:local --name autopecas
+
+# 2. Aplicar
+kubectl apply -f infra/k8s/
+```
+
+Se estiver aplicando num cluster que não veio deste Terraform, crie antes o ConfigMap do realm:
+
+```bash
+kubectl create configmap keycloak-realm -n autopecas \
+  --from-file=realm-export.json=keycloak/realm-export.json
 ```
 
 ---
 
+### Recursos criados pelos manifestos
+
+| Arquivo | Recursos | Pontos de atenção |
+|---|---|---|
+| `00-namespace.yaml` | Namespace | Pod Security Standards: `baseline` |
+| `10-configmap-app.yaml` | ConfigMap `autopecas-config` | Endereços e perfil — nada sensível |
+| `11-secret-app.yaml` | Secrets `autopecas-secrets`, `keycloak-secrets` | Credenciais. **Valores de desenvolvimento** |
+| `20-keycloak.yaml` | Deployment + Service + NodePort | `KC_HOSTNAME_URL` fixa o issuer |
+| `30-app-deployment.yaml` | Deployment + Service + NodePort + PDB | Probes, `requests`/`limits`, rootfs somente leitura |
+| `40-app-hpa.yaml` | HorizontalPodAutoscaler | CPU 70% (motor) / memória 85% (proteção), 2–5 réplicas |
+
+#### ConfigMap × Secret
+
+O critério: **se o valor pode aparecer num `kubectl describe` sem causar dano, é ConfigMap.**
+
+| ConfigMap | Secret |
+|---|---|
+| `SPRING_PROFILES_ACTIVE`, `DB_URL` | `DB_USERNAME`, `DB_PASSWORD` |
+| `OAUTH2_JWK_URI`, `OAUTH2_ISSUER_URI` | `KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD` |
+| `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID`, `TZ` | `KC_DB_USERNAME`, `KC_DB_PASSWORD` |
+
+Ambos entram no pod por `envFrom`, então as chaves são exatamente os nomes das variáveis lidas
+por `application-prod.yml`.
+
+#### Probes
+
+| Probe | Endpoint | Papel |
+|---|---|---|
+| `startupProbe` | `/actuator/health/readiness` | Dá até ~3min30 para Flyway + JPA subirem, sem afrouxar a liveness |
+| `readinessProbe` | `/actuator/health/readiness` | Tira o pod do balanceamento se ele não consegue atender |
+| `livenessProbe` | `/actuator/health/liveness` | Reinicia o pod travado |
+
+A distinção importa: apontar a **liveness** para um endpoint que depende do banco causaria
+reinícios em cascata numa indisponibilidade do PostgreSQL — os pods seriam mortos justamente
+quando não há nada de errado com eles.
+
+`/actuator/health/**` é liberado sem autenticação no `SecurityConfig`: o kubelet chama as probes
+sem credencial alguma, e exigir token faria toda readiness/liveness responder 401 — pod em
+`CrashLoopBackOff` com a aplicação perfeitamente saudável. O que fica exposto é só `UP`/`DOWN`;
+o profile `prod` publica apenas `health` e `info`, com `show-details: never`. Os demais endpoints
+do Actuator seguem exigindo token — verificado: `/actuator/env` responde 401.
+
+#### Por que a API tem limite de memória mas não de CPU
+
+Throttling de CPU numa JVM degrada muito a latência (o GC e o JIT competem pelas mesmas fatias),
+e o `requests.cpu` já garante a fatia mínima sob contenção. Memória tem limite porque estouro
+precisa virar OOMKill: um pod vazando memória deve morrer e ser substituído, não arrastar o nó.
+
+---
+
+### Passo a passo completo
+
+Do zero até a API respondendo autenticada:
+
+```bash
+# 1 ─ Provisionar cluster + banco
+cd infra/terraform
+terraform init
+terraform apply -target=kind_cluster.autopecas -auto-approve
+terraform apply -auto-approve
+cd ../..
+
+# 2 ─ Construir e carregar a imagem
+docker build -t autopecas-api:local .
+kind load docker-image autopecas-api:local --name autopecas
+
+# 3 ─ Aplicar os manifestos
+kubectl apply -f infra/k8s/
+
+# 4 ─ Aguardar (o Keycloak importa o realm no primeiro boot; leva ~1min)
+kubectl wait --for=condition=available --timeout=300s \
+  deployment/keycloak deployment/autopecas-api -n autopecas
+
+# 5 ─ Conferir
+kubectl get pods,svc,hpa -n autopecas
+```
+
+#### Obter um token e chamar a API
+
+```bash
+TOKEN=$(curl -s -X POST \
+  "http://localhost:9080/realms/autopecas/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "client_id=autopecas-api" \
+  -d "username=test_user" \
+  -d "password=1234" | sed -E 's/.*"access_token":"([^"]+)".*/\1/')
+
+curl -s http://localhost:8080/api/clientes -H "Authorization: Bearer $TOKEN"
+```
+
+> **Sobre o issuer:** o Keycloak roda com `KC_HOSTNAME_URL=http://keycloak:8080`, então o claim
+> `iss` do token é sempre esse endereço — mesmo quando o token é pedido em `localhost:9080`. É
+> o que permite à API validar com `OAUTH2_ISSUER_URI=http://keycloak:8080/realms/autopecas`.
+> Sem fixar o hostname, o issuer refletiria o `Host` da requisição e o token seria rejeitado.
+
+---
+
+### Autoscaling: como verificar
+
+```bash
+kubectl get hpa -n autopecas -w
+```
+
+```
+NAME            REFERENCE                  TARGETS                        MINPODS  MAXPODS  REPLICAS
+autopecas-api   Deployment/autopecas-api   cpu: 2%/70%, memory: 55%/85%   2        5        2
+```
+
+Se `TARGETS` mostrar `<unknown>`, o metrics-server não está coletando:
+
+```bash
+kubectl get deployment metrics-server -n kube-system
+kubectl top pods -n autopecas          # precisa responder
+```
+
+#### Gerar carga
+
+```bash
+kubectl run carga --rm -it --restart=Never --image=busybox:1.36 -n autopecas -- \
+  sh -c 'while true; do wget -q -O- http://autopecas-api:8080/actuator/health >/dev/null; done'
+```
+
+Com `stabilizationWindowSeconds: 60` na subida, novas réplicas aparecem em ~1 minuto. Ao parar
+a carga, a descida leva 5 minutos — janela propositalmente longa para evitar o vai-e-vem de
+réplicas quando a carga oscila, já que cada pod novo custa o startup da JVM.
+
+#### O que a medição mostrou
+
+Execução real neste projeto, em cluster kind. Ciclo completo de subida e descida,
+lido dos eventos do HPA:
+
+```
+SuccessfulRescale  New size: 4   reason: cpu resource utilization above target
+SuccessfulRescale  New size: 3   reason: All metrics below target
+SuccessfulRescale  New size: 2   reason: All metrics below target
+```
+
+| Métrica | Ocioso | Sob carga |
+|---|---|---|
+| CPU | 2% do alvo | **220%** do alvo → subiu 2 → 4 réplicas |
+| Memória | 52% do alvo | 51% do alvo (praticamente inalterada) |
+
+Repare no contraste: sob carga a CPU vai a 220% enquanto a memória **cai** de 52% para 51%. É a
+demonstração direta de que, nesta aplicação, memória não é sinal de demanda — e a razão de ela
+ser configurada como proteção, não como motor.
+
+A subida respeitou a política de 2 pods por janela (2 → 4, não 2 → 8), e a descida levou os
+5 minutos da janela de estabilização, passando por 3 antes de voltar ao piso de 2.
+
+Na configuração anterior — request de 512 Mi e alvo de memória em 80% — a mesma carga levou a
+frota a **6 réplicas**, com a memória travada em 82% (acima do alvo) em regime permanente.
+
+Dois aprendizados que estão embutidos na configuração atual:
+
+**1. Memória não é sinal de autoscaling para JVM.** O consumo não acompanha a carga — o heap é
+gerido pelo GC, não por requisição. E, diferente da CPU, ela **não converge**: acrescentar
+réplicas não baixa a memória por pod, porque cada réplica nova carrega o próprio heap. Com o
+request original de 512 Mi, os 419 Mi davam 82% de utilização — acima do alvo de 80% — e o HPA
+teria escalado até o teto sem nunca voltar. Por isso o request subiu para 768 Mi (patamar normal
+~55%) e o alvo de memória foi para 85%: ela virou grade de proteção contra pressão real, e quem
+modula a frota é a CPU.
+
+**2. `maxReplicas` precisa caber na máquina.** Cada réplica é uma JVM de ~420 Mi. Seis delas,
+somadas ao Keycloak, saturaram o ambiente de teste — e no reinício seguinte o boot simultâneo
+de todos os pods travou o engine do Docker. Daí o teto de 5 em cluster local.
+
+---
+
+### Segredos em produção
+
+`infra/k8s/11-secret-app.yaml` está versionado **para o ambiente local**, com valores de
+desenvolvimento. Um Secret do Kubernetes é apenas base64: qualquer um com leitura no namespace
+lê o conteúdo em claro.
+
+Em produção, escolha um destes caminhos e **remova o arquivo do repositório**:
+
+| Abordagem | Como funciona | Quando usar |
+|---|---|---|
+| **External Secrets Operator** | O Secret é sincronizado de um cofre (AWS Secrets Manager, Vault, Key Vault). Nada sensível é versionado | Padrão quando já existe um cofre |
+| **Sealed Secrets** (Bitnami) | O valor é cifrado com a chave pública do cluster; só o controlador decifra. O arquivo cifrado pode ser versionado | GitOps sem cofre externo |
+| **`kubectl create secret` no pipeline** | Valores vêm do cofre de segredos do CI | Setup mais simples |
+
+O mesmo vale para o Terraform: `postgres_password` é `sensitive`, o que impede o valor de
+aparecer no output — mas ele **fica em texto claro no arquivo de state**. Por isso o state
+nunca deve ser versionado (ver `infra/terraform/.gitignore`); em equipe, use backend remoto com
+criptografia (S3 + KMS, Terraform Cloud).
+
+---
+
+### Operação e diagnóstico
+
+```bash
+# Logs
+kubectl logs -f deployment/autopecas-api -n autopecas
+kubectl logs -f deployment/keycloak -n autopecas
+
+# Por que um pod não sobe
+kubectl describe pod -l app.kubernetes.io/name=autopecas-api -n autopecas
+kubectl get events -n autopecas --sort-by=.lastTimestamp
+
+# Acesso direto ao banco
+kubectl exec -it postgres-0 -n autopecas -- psql -U postgres -d app_db
+
+# Forçar novo deploy após rebuild da imagem
+docker build -t autopecas-api:local .
+kind load docker-image autopecas-api:local --name autopecas
+kubectl rollout restart deployment/autopecas-api -n autopecas
+kubectl rollout status  deployment/autopecas-api -n autopecas
+```
+
+#### Problemas comuns
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| `ErrImagePull` / `ImagePullBackOff` | Imagem não carregada no kind | `kind load docker-image autopecas-api:local --name autopecas` |
+| HPA com `TARGETS: <unknown>` | metrics-server ausente ou sem coletar | `kubectl get deploy metrics-server -n kube-system` |
+| API em `CrashLoopBackOff` | Banco indisponível ou migration falhando | `kubectl logs` — procure erro do Flyway |
+| 401 em toda requisição | Issuer do token ≠ `OAUTH2_ISSUER_URI` | Confira `KC_HOSTNAME_URL` no Deployment do Keycloak |
+| Keycloak reiniciando | Banco `keycloak_db` inexistente | Confira o ConfigMap `postgres-init`; recrie o PVC |
+| Porta 8080 ocupada no host | Outro processo | Ajuste `app_host_port` no `terraform.tfvars` |
+
+---
+
+### Destruir o ambiente
+
+```bash
+cd infra/terraform
+terraform destroy
+```
+
+Isso remove o cluster inteiro — e com ele o PVC e todos os dados. Para apagar apenas a
+aplicação, mantendo cluster e banco:
+
+```bash
+kubectl delete -f infra/k8s/
+```
+
+Para zerar o banco sem destruir o cluster (o PVC sobrevive à exclusão do StatefulSet, por
+design):
+
+```bash
+kubectl delete pvc data-postgres-0 -n autopecas
+terraform apply
+```
+
+### Executar fora de container (desenvolvimento)
+
+Para iterar no código sem reconstruir a imagem a cada mudança: sobe só as dependências no
+Compose e roda a aplicação na máquina, com o profile `dev`.
+
+```bash
+docker compose up postgres keycloak -d
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+O profile `dev` difere do `prod` em dois pontos: `ddl-auto: none` (não valida o schema contra
+as entidades) e log SQL ligado.
+
+---
 ## 🧪 Testes e Cobertura
 
 ### Executar os testes
@@ -522,25 +1082,40 @@ Aguarde `BUILD SUCCESS` e acesse o dashboard em `http://localhost:9000`.
 
 ### Profile `prod`
 
-| Variável                   | Descrição                                               |
-|----------------------------|---------------------------------------------------------|
-| `DB_URL`                   | URL de conexão com o banco PostgreSQL                   |
-| `DB_USERNAME`              | Usuário do banco                                        |
-| `DB_PASSWORD`              | Senha do banco                                          |
-| `KEYCLOAK_ISSUER_URI`      | URI do realm Keycloak (`http://<host>/realms/<realm>`)  |
-| `KEYCLOAK_CLIENT_ID`       | Client ID configurado no Keycloak (padrão: `autopecas-api`) |
-| `KEYCLOAK_AUTH_SERVER_URL` | URL base do Keycloak                                    |
-| `KEYCLOAK_REALM`           | Nome do realm                                           |
-| `SPRING_PROFILES_ACTIVE`   | `prod`                                                  |
+Usado pelo container em qualquer ambiente — Compose e Kubernetes. Neste profile o Hibernate
+roda com `ddl-auto: validate`: quem cria e evolui o schema é o Flyway, e o Hibernate apenas
+confere se o mapeamento bate com o banco.
+
+| Variável                   | Onde vive no K8s | Descrição                                              |
+|----------------------------|------------------|--------------------------------------------------------|
+| `SPRING_PROFILES_ACTIVE`   | ConfigMap        | `prod`                                                 |
+| `DB_URL`                   | ConfigMap        | URL JDBC do PostgreSQL                                 |
+| `DB_USERNAME`              | **Secret**       | Usuário do banco                                       |
+| `DB_PASSWORD`              | **Secret**       | Senha do banco                                         |
+| `OAUTH2_ISSUER_URI`        | ConfigMap        | Issuer esperado no claim `iss` do token                |
+| `OAUTH2_JWK_URI`           | ConfigMap        | Endpoint JWKS usado para validar a assinatura          |
+| `KEYCLOAK_CLIENT_ID`       | ConfigMap        | Client ID no Keycloak (padrão: `autopecas-api`)        |
+| `KEYCLOAK_AUTH_SERVER_URL` | ConfigMap        | URL base do Keycloak (documentação/health)             |
+| `KEYCLOAK_REALM`           | ConfigMap        | Nome do realm                                          |
+| `JAVA_OPTS`                | ConfigMap        | Flags extras da JVM                                    |
+
+O critério da divisão: se o valor pode aparecer num `kubectl describe` sem causar dano, é
+ConfigMap. Endereços são endereços; credenciais vão para o Secret.
+
+`OAUTH2_JWK_URI` e `OAUTH2_ISSUER_URI` podem apontar para hosts diferentes — é o caso no
+Compose, onde o JWKS é buscado pela rede interna (`keycloak:8080`) e o issuer é o endereço que
+o cliente usa (`localhost:9080`).
 
 ### Docker Compose (`app` service)
 
 ```yaml
 environment:
-  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/app_db
-  SPRING_DATASOURCE_USERNAME: postgres
-  SPRING_DATASOURCE_PASSWORD: postgres
-  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/app-realm
+  SPRING_PROFILES_ACTIVE: prod
+  DB_URL: jdbc:postgresql://postgres:5432/app_db
+  DB_USERNAME: postgres
+  DB_PASSWORD: postgres
+  OAUTH2_JWK_URI: http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs
+  OAUTH2_ISSUER_URI: http://localhost:9080/realms/autopecas
 ```
 
 ---

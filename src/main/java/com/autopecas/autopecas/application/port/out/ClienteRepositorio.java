@@ -23,6 +23,12 @@ public interface ClienteRepositorio {
 
     Optional<Cliente> porId(UUID id);
 
+    /**
+     * Busca o cliente ativo pelo e-mail, usado para ligar o usuário autenticado no Keycloak ao
+     * seu cadastro. A coluna é UNIQUE, então no máximo um cliente responde por e-mail.
+     */
+    Optional<Cliente> porEmail(String email);
+
     boolean existePorId(UUID id);
 
     List<Cliente> ativos();

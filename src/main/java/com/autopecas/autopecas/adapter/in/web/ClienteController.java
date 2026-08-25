@@ -44,9 +44,10 @@ public class ClienteController {
                 .map(mapper::paraResposta).toList());
     }
 
-    // CLIENTE pode consultar o próprio cadastro pelo ID
+    // CLIENTE pode consultar o próprio cadastro — e somente o próprio
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehOProprioCliente(authentication, #id)")
     public ResponseEntity<ClienteResponseDTO> buscarPorId(@PathVariable UUID id) {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeClientes.porId(id)));
     }

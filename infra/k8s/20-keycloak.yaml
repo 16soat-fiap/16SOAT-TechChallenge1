@@ -1,0 +1,143 @@
+# =============================================================================
+# Keycloak — Identity Provider do stack.
+#
+# Roda em `start-dev` porque é o modo que aceita `--import-realm` sem um passo
+# de build prévio da imagem. Para produção o caminho seria `kc.sh build` numa
+# imagem própria e `start --optimized`, com TLS terminado no Ingress.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  # Réplica única: o import do realm não é coordenado entre instâncias e o
+  # modo dev não forma cluster. Escalar exige `start --optimized` + cache Infinispan.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/part-of: autopecas
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0.0
+          args: ["start-dev", "--import-realm"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres:5432/keycloak_db
+            # Fixa o endereço que o Keycloak usa para montar o claim `iss`.
+            # Sem isto, o issuer refletiria o Host da requisição e um token
+            # pedido via port-forward (localhost) seria rejeitado pela API,
+            # que espera http://keycloak:8080.
+            - name: KC_HOSTNAME_URL
+              value: http://keycloak:8080
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+          envFrom:
+            - secretRef:
+                name: keycloak-secrets
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          # Health na porta 8080, e não numa porta de management separada: a
+          # interface de management na 9000 só existe a partir do Keycloak 25 —
+          # a 24 expõe /health/* no próprio listener HTTP (verificado no container).
+          #
+          # O boot do Keycloak passa de 2 minutos (augmentation do Quarkus +
+          # import do realm). A startupProbe absorve isso sem afrouxar a
+          # liveness, que segue rígida depois que o pod está de pé.
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60      # até 5 minutos para subir
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Acesso a partir da máquina host. No cluster kind, a porta 30081 do nó é
+# mapeada para 9080 do host (ver infra/terraform/cluster.tf).
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-nodeport
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30081

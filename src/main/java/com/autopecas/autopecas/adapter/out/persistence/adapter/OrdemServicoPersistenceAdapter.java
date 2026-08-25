@@ -30,7 +30,10 @@ public class OrdemServicoPersistenceAdapter implements OrdemServicoRepositorio {
         if (ordemServico.isNovo()) {
             entidade = mapper.novaEntidade(ordemServico);
         } else {
-            entidade = repository.findById(ordemServico.getId())
+            // porIdParaAtualizacao aplica OPTIMISTIC_FORCE_INCREMENT: é o que devolve ao agregado
+            // destacado a proteção contra lost update que o @Version dava quando a entidade JPA
+            // era o próprio domínio.
+            entidade = repository.porIdParaAtualizacao(ordemServico.getId())
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Ordem de serviço não encontrada com ID: " + ordemServico.getId()));
             mapper.aplicar(ordemServico, entidade);

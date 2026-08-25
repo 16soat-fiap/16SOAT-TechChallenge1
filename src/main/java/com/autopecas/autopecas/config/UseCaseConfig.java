@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.config;
 
 import com.autopecas.autopecas.application.port.in.ConsultaDeIndicadores;
+import com.autopecas.autopecas.application.port.in.ControleDeAcessoDoCliente;
 import com.autopecas.autopecas.application.port.in.GestaoDeClientes;
 import com.autopecas.autopecas.application.port.in.GestaoDeFuncionarios;
 import com.autopecas.autopecas.application.port.in.GestaoDeOrcamentos;
@@ -24,6 +25,7 @@ import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.Transacao;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.application.usecase.ConsultaDeIndicadoresUseCase;
+import com.autopecas.autopecas.application.usecase.ControleDeAcessoDoClienteUseCase;
 import com.autopecas.autopecas.application.usecase.GestaoDeClientesUseCase;
 import com.autopecas.autopecas.application.usecase.GestaoDeFuncionariosUseCase;
 import com.autopecas.autopecas.application.usecase.GestaoDeOrcamentosUseCase;
@@ -119,5 +121,14 @@ public class UseCaseConfig {
     @Bean
     public ConsultaDeIndicadores consultaDeIndicadores(ConsultaIndicadores consultaIndicadores) {
         return new ConsultaDeIndicadoresUseCase(consultaIndicadores);
+    }
+
+    @Bean
+    public ControleDeAcessoDoCliente controleDeAcessoDoCliente(
+            ClienteRepositorio clienteRepositorio,
+            VeiculoRepositorio veiculoRepositorio,
+            OrdemServicoRepositorio ordemServicoRepositorio) {
+        return new ControleDeAcessoDoClienteUseCase(clienteRepositorio, veiculoRepositorio,
+                ordemServicoRepositorio);
     }
 }

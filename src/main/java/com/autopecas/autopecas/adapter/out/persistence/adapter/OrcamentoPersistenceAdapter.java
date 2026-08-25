@@ -31,7 +31,9 @@ public class OrcamentoPersistenceAdapter implements OrcamentoRepositorio {
         if (orcamento.isNovo()) {
             entidade = mapper.novaEntidade(orcamento);
         } else {
-            entidade = repository.findById(orcamento.getId())
+            // Mesma razão do adapter da OS: o FORCE_INCREMENT é o que faz aprovar o mesmo
+            // orçamento em duas transações paralelas falhar de um dos lados.
+            entidade = repository.porIdParaAtualizacao(orcamento.getId())
                     .orElseThrow(() -> new ResourceNotFoundException("Orcamento não encontrado"));
             mapper.aplicar(orcamento, entidade);
         }

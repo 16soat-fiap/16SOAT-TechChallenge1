@@ -43,9 +43,10 @@ public class OrcamentoController {
                 gestaoDeOrcamentos.criar(osId, mapper.paraComando(orcamentoDto))));
     }
 
-    // CLIENTE pode listar os orçamentos da própria OS
+    // CLIENTE pode listar os orçamentos da própria OS — e somente dela
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehDonoDaOrdemServico(authentication, #osId)")
     public ResponseEntity<List<OrcamentoResponseDTO>> listar(@PathVariable UUID osId) {
         return ResponseEntity.ok(gestaoDeOrcamentos.daOrdemServico(osId).stream()
                 .map(mapper::paraResposta).toList());
@@ -60,9 +61,10 @@ public class OrcamentoController {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeOrcamentos.enviar(osId, id)));
     }
 
-    // Aprovar e rejeitar são ações do CLIENTE (ou ADMIN/ATENDENTE em nome dele)
+    // Aprovar e rejeitar são ações do CLIENTE dono da OS (ou ADMIN/ATENDENTE em nome dele)
     @PatchMapping("/{id}/aprovar")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehDonoDaOrdemServico(authentication, #osId)")
     public ResponseEntity<OrcamentoResponseDTO> aprovar(
             @PathVariable UUID osId,
             @PathVariable UUID id) {
@@ -70,7 +72,8 @@ public class OrcamentoController {
     }
 
     @PatchMapping("/{id}/rejeitar")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'CLIENTE')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE') "
+            + "or @propriedade.ehDonoDaOrdemServico(authentication, #osId)")
     public ResponseEntity<OrcamentoResponseDTO> rejeitar(
             @PathVariable UUID osId,
             @PathVariable UUID id,

@@ -63,6 +63,14 @@ public class ClientePersistenceAdapter implements ClienteRepositorio {
     }
 
     @Override
+    public Optional<Cliente> porEmail(String email) {
+        if (email == null || email.isBlank()) {
+            return Optional.empty();
+        }
+        return clienteRepository.findByEmailIgnoreCaseAndAtivoTrue(email).map(mapper::paraDominio);
+    }
+
+    @Override
     public boolean existePorId(UUID id) {
         return clienteRepository.existsById(id);
     }

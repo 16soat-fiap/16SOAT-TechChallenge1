@@ -1,0 +1,577 @@
+name: CI/CD - Autopecas API - Local Kubernetes
+
+on:
+  push:
+    branches:
+      - refactor/arquitetura-hexagonal
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+env:
+  JAVA_VERSION: '21'
+  KIND_CLUSTER_NAME: 'autopecas'
+  K8S_NAMESPACE: 'autopecas'
+  IMAGE_NAME: 'autopecas-api:local'
+
+# Evita duas pipelines tentando manipular
+# o mesmo cluster Kind simultaneamente.
+concurrency:
+  group: autopecas-local-deployment
+  cancel-in-progress: false
+jobs:
+  # ============================================================
+  # 1. BUILD + TESTES
+  # ============================================================
+  build-test:
+    name: Build e Testes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Dar permissão ao Maven Wrapper
+        run: chmod +x mvnw
+      - name: Verificar versão Java
+        run: java -version
+      - name: Verificar Maven
+        run: ./mvnw --version
+      - name: Validar projeto
+        run: ./mvnw validate
+      - name: Executar testes
+        run: ./mvnw clean verify
+  # ============================================================
+  # 2. VALIDAÇÃO TERRAFORM
+  # ============================================================
+  terraform-validation:
+    name: Validar Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: |
+          terraform init -backend=false
+      - name: Terraform Format Check
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: |
+          terraform validate
+  # ============================================================
+  # 3. DEPLOY LOCAL
+  #
+  # IMPORTANTE:
+  # Este job precisa rodar no computador onde:
+  #
+  # Docker
+  # Kind
+  # kubectl
+  # Terraform
+  #
+  # estão instalados.
+  # ============================================================
+  deploy-local:
+    name: Deploy Kubernetes Local
+    needs:
+      - build-test
+      - terraform-validation
+    # Self-hosted Runner instalado na máquina local
+    runs-on:
+      - self-hosted
+      - linux
+      - x64
+      - autopecas
+    # Deploy somente em push.
+    # Pull Request executa CI, mas não altera o cluster.
+    if: github.event_name == 'push'
+    steps:
+      # ==========================================================
+      # CHECKOUT
+      # ==========================================================
+      # clean: false preserva arquivos gerados pelo runner local.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          clean: false
+      # ==========================================================
+      # JAVA
+      # ==========================================================
+      - name: Verificar Java 21
+        run: |
+          java -version
+      # ==========================================================
+      # MAVEN
+      # ==========================================================
+      - name: Verificar Maven
+        run: |
+          ./mvnw --version
+      # ==========================================================
+      # DOCKER
+      # ==========================================================
+      - name: Verificar Docker
+        run: |
+          docker version
+      # ==========================================================
+      # KIND
+      # ==========================================================
+      - name: Verificar Kind
+        run: |
+          kind version
+      # ==========================================================
+      # KUBECTL
+      # ==========================================================
+      - name: Verificar kubectl
+        run: |
+          kubectl version --client
+      # ==========================================================
+      # TERRAFORM
+      # ==========================================================
+      - name: Verificar Terraform
+        run: |
+          terraform version
+      # ==========================================================
+      # TERRAFORM INIT
+      #
+      # -upgrade é importante para atualizar o provider Kubernetes
+      # e evitar problemas de identidade do StatefulSet.
+      # ==========================================================
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: |
+          terraform init -upgrade
+      # ==========================================================
+      # TERRAFORM FORMAT
+      # ==========================================================
+      - name: Terraform Format Check
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+      # ==========================================================
+      # TERRAFORM VALIDATE
+      # ==========================================================
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: |
+          terraform validate
+      # ==========================================================
+      # TERRAFORM PROVIDERS
+      #
+      # Ajuda a identificar no log qual versão do provider
+      # está realmente sendo utilizada pelo runner.
+      # ==========================================================
+      - name: Terraform Providers
+        working-directory: infra/terraform
+        run: |
+          terraform providers
+      # ==========================================================
+      # VERIFICAR CLUSTER KIND
+      # ==========================================================
+      - name: Verificar cluster Kind
+        id: kind-check
+        run: |
+          if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Cluster ${KIND_CLUSTER_NAME} já existe."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Cluster ${KIND_CLUSTER_NAME} não existe."
+          fi
+      # ==========================================================
+      # PRIMEIRO APPLY
+      #
+      # Necessário porque os providers Kubernetes e Helm
+      # dependem do kubeconfig criado pelo Kind.
+      # ==========================================================
+      - name: Criar cluster Kind
+        if: steps.kind-check.outputs.exists == 'false'
+        working-directory: infra/terraform
+        run: |
+          terraform apply \
+            -auto-approve \
+            -target=kind_cluster.autopecas
+      # ==========================================================
+      # SEGUNDO APPLY
+      #
+      # Provisiona:
+      #
+      # - Namespace
+      # - PostgreSQL
+      # - PVC
+      # - Metrics Server
+      # - Keycloak
+      # - ConfigMaps
+      # - Secrets
+      # - Demais recursos Terraform
+      #
+      # IMPORTANTE:
+      #
+      # O Terraform NÃO aguarda o rollout do PostgreSQL.
+      #
+      # O wait_for_rollout = true deve estar removido
+      # do kubernetes_stateful_set.postgres.
+      #
+      # O rollout será controlado pelo kubectl posteriormente.
+      # ==========================================================
+      - name: Provisionar infraestrutura
+        working-directory: infra/terraform
+        env:
+          TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          terraform apply \
+            -auto-approve
+      # ==========================================================
+      # KUBERNETES CONTEXT
+      # ==========================================================
+      - name: Configurar contexto Kubernetes
+        run: |
+          kubectl config use-context kind-${KIND_CLUSTER_NAME}
+      # ==========================================================
+      # VERIFICAR CLUSTER
+      # ==========================================================
+      - name: Verificar cluster Kubernetes
+        run: |
+          kubectl cluster-info
+          kubectl get nodes
+      # ==========================================================
+      # VERIFICAR NAMESPACE
+      # ==========================================================
+      - name: Verificar namespace
+        run: |
+          kubectl get namespace ${K8S_NAMESPACE}
+      # ==========================================================
+      # POSTGRESQL
+      # ==========================================================
+      - name: Verificar PostgreSQL
+        run: |
+          echo "=========================================="
+          echo "PostgreSQL"
+          echo "=========================================="
+
+          echo ""
+          echo "StatefulSet:"
+          kubectl get statefulset postgres \
+            -n ${K8S_NAMESPACE}
+          echo ""
+          echo "Pods:"
+          kubectl get pods \
+            -n ${K8S_NAMESPACE} \
+            -l app.kubernetes.io/name=postgres
+          echo ""
+          echo "PVC:"
+          kubectl get pvc \
+            -n ${K8S_NAMESPACE}
+      # ==========================================================
+      # AGUARDAR POSTGRESQL
+      #
+      # Terraform apenas cria o recurso.
+      #
+      # O kubectl é responsável por aguardar o rollout.
+      # ==========================================================
+      - name: Aguardar PostgreSQL
+        run: |
+          echo "=========================================="
+          echo "Aguardando PostgreSQL..."
+          echo "=========================================="
+          if ! kubectl rollout status \
+            statefulset/postgres \
+            -n ${K8S_NAMESPACE} \
+            --timeout=5m; then
+
+            echo ""
+            echo "=========================================="
+            echo "FALHA NO ROLLOUT DO POSTGRESQL"
+            echo "=========================================="
+          
+            echo ""
+            echo "Pods:"
+            kubectl get pods \
+              -n ${K8S_NAMESPACE} \
+              -o wide
+            echo ""
+            echo "StatefulSet:"
+            kubectl get statefulset postgres \
+              -n ${K8S_NAMESPACE} \
+              -o wide
+
+            echo ""
+            echo "PVC:"
+            kubectl get pvc \
+              -n ${K8S_NAMESPACE}
+
+            echo ""
+            echo "Describe PostgreSQL:"
+            kubectl describe statefulset postgres \
+              -n ${K8S_NAMESPACE} || true
+
+            echo ""
+            echo "Describe Pod postgres-0:"
+            kubectl describe pod postgres-0 \
+              -n ${K8S_NAMESPACE} || true
+
+            echo ""
+            echo "Logs PostgreSQL:"
+            kubectl logs postgres-0 \
+              -n ${K8S_NAMESPACE} \
+              --all-containers=true \
+              --tail=200 || true
+
+            echo ""
+            echo "Eventos Kubernetes:"
+            kubectl get events \
+              -n ${K8S_NAMESPACE} \
+              --sort-by='.lastTimestamp' \
+              | tail -50
+
+            exit 1
+          fi
+
+          echo ""
+          echo "=========================================="
+          echo "PostgreSQL disponível."
+          echo "=========================================="
+      # ==========================================================
+      # GARANTIR BANCO KEYCLOAK
+      #
+      # O init script do PostgreSQL so executa na PRIMEIRA
+      # inicializacao do volume. Se o PVC ja existir de um run
+      # anterior (com o script corrompido por CRLF), o banco
+      # keycloak_db pode nao ter sido criado. Este passo garante
+      # de forma idempotente que o banco existe antes do Keycloak
+      # tentar conectar, independentemente do historico do volume.
+      # ==========================================================
+      - name: Garantir banco keycloak_db
+        run: |
+          echo "=========================================="
+          echo "Garantindo existencia do banco keycloak_db..."
+          echo "=========================================="
+
+          kubectl exec postgres-0 -n ${K8S_NAMESPACE} -- \
+            bash -c "psql -U postgres -tc \
+              \"SELECT 1 FROM pg_database WHERE datname = 'keycloak_db'\" \
+              | grep -q 1 \
+              || psql -U postgres -c 'CREATE DATABASE keycloak_db'"
+
+          echo ""
+          echo "Banco keycloak_db garantido."
+          echo "=========================================="
+      # ==========================================================
+      # DOCKER BUILD
+      # ==========================================================
+      - name: Build da imagem Docker
+        run: |
+          docker build \
+            -t ${IMAGE_NAME} \
+            .
+      # ==========================================================
+      # KIND LOAD
+      #
+      # Kind não utiliza registry.
+      #
+      # A imagem precisa ser carregada diretamente no cluster.
+      # ==========================================================
+      - name: Carregar imagem no Kind
+        run: |
+          kind load docker-image \
+            ${IMAGE_NAME} \
+            --name ${KIND_CLUSTER_NAME}
+      # ==========================================================
+      # ==========================================================
+      # KUBERNETES
+      # ==========================================================
+      - name: Aplicar manifestos Kubernetes
+        run: |
+          kubectl apply \
+            -f infra/k8s/
+      # ==========================================================
+      # AGUARDAR KEYCLOAK
+      #
+      # O Keycloak e verificado IMEDIATAMENTE apos o apply,
+      # antes de qualquer outro rollout, pois e o servico mais
+      # lento do stack (Quarkus augmentation + import de realm
+      # levam ate 5 minutos). Aguardar a API primeiro consumiria
+      # a janela de timeout disponivel para o Keycloak.
+      # ==========================================================
+      - name: Aguardar Keycloak
+        run: |
+          echo "=========================================="
+          echo "Aguardando Keycloak..."
+          echo "=========================================="
+          if ! kubectl rollout status \
+            deployment/keycloak \
+            -n ${K8S_NAMESPACE} \
+            --timeout=10m; then
+            echo ""
+            echo "=========================================="
+            echo "FALHA NO ROLLOUT DO KEYCLOAK"
+            echo "=========================================="
+            echo ""
+            echo "Pods:"
+            kubectl get pods \
+              -n ${K8S_NAMESPACE} \
+              -o wide
+            echo ""
+            echo "Deployment:"
+            kubectl get deployment keycloak \
+              -n ${K8S_NAMESPACE} \
+              -o wide
+            echo ""
+            echo "Describe Deployment:"
+            kubectl describe deployment keycloak \
+              -n ${K8S_NAMESPACE} || true
+            echo ""
+            echo "Describe Pod keycloak:"
+            kubectl describe pod \
+              -n ${K8S_NAMESPACE} \
+              -l app.kubernetes.io/name=keycloak || true
+            echo ""
+            echo "Logs Keycloak:"
+            kubectl logs \
+              -n ${K8S_NAMESPACE} \
+              -l app.kubernetes.io/name=keycloak \
+              --all-containers=true \
+              --tail=200 || true
+            echo ""
+            echo "Eventos Kubernetes:"
+            kubectl get events \
+              -n ${K8S_NAMESPACE} \
+              --sort-by='.lastTimestamp' \
+              | tail -50
+            exit 1
+          fi
+          echo ""
+          echo "=========================================="
+          echo "Keycloak disponivel."
+          echo "=========================================="
+      # ==========================================================
+      # API
+      #
+      # Como a imagem possui a mesma tag :local, o Kubernetes
+      # pode entender que nao existe alteracao.
+      #
+      # Forcamos o rollout da API.
+      # ==========================================================
+      - name: Reiniciar Deployment da API
+        run: |
+          kubectl rollout restart \
+            deployment/autopecas-api \
+            -n ${K8S_NAMESPACE}
+      # ==========================================================
+      # AGUARDAR API
+      # ==========================================================
+      - name: Aguardar API
+        run: |
+          kubectl rollout status \
+            deployment/autopecas-api \
+            -n ${K8S_NAMESPACE} \
+            --timeout=5m
+      - name: Verificar Pods
+        run: |
+          kubectl get pods \
+            -n ${K8S_NAMESPACE} \
+            -o wide
+      - name: Verificar Services
+        run: |
+          kubectl get services \
+            -n ${K8S_NAMESPACE}
+      - name: Verificar HPA
+        run: |
+          kubectl get hpa \
+            -n ${K8S_NAMESPACE}
+      # ==========================================================
+      # METRICS SERVER
+      # ==========================================================
+      - name: Verificar Metrics API
+        run: |
+          kubectl get --raw \
+            "/apis/metrics.k8s.io/v1beta1/nodes" \
+            > /dev/null
+      # ==========================================================
+      # HEALTH CHECK API
+      # ==========================================================
+      - name: Health Check
+        run: |
+          echo "Aguardando API..."
+          for i in {1..30}; do
+            if curl \
+              --fail \
+              --silent \
+              http://localhost:8080/actuator/health/readiness \
+              > /dev/null; then
+              echo "API disponível."
+              exit 0
+            fi
+            echo "API ainda não disponível..."
+            sleep 10
+          done
+          echo "API não ficou disponível."
+          echo ""
+          echo "Pods:"
+          kubectl get pods \
+            -n ${K8S_NAMESPACE}
+          echo ""
+          echo "Describe Deployment:"
+          kubectl describe deployment \
+            autopecas-api \
+            -n ${K8S_NAMESPACE}
+          echo ""
+          echo "Logs API:"
+          kubectl logs \
+            deployment/autopecas-api \
+            -n ${K8S_NAMESPACE} \
+            --tail=200 || true
+          exit 1
+      # ==========================================================
+      # INFORMAÇÕES FINAIS
+      # ==========================================================
+      - name: Resumo do deploy
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "       DEPLOY LOCAL FINALIZADO"
+          echo "=========================================="
+
+          echo ""
+          echo "Cluster:"
+          kubectl config current-context
+
+          echo ""
+          echo "Nodes:"
+          kubectl get nodes
+
+          echo ""
+          echo "Pods:"
+          kubectl get pods \
+            -n ${K8S_NAMESPACE}
+
+          echo ""
+          echo "Services:"
+          kubectl get svc \
+            -n ${K8S_NAMESPACE}
+
+          echo ""
+          echo "HPA:"
+          kubectl get hpa \
+            -n ${K8S_NAMESPACE}
+
+          echo ""
+          echo "API:"
+          echo "http://localhost:8080"
+          echo ""
+          echo "Swagger:"
+          echo "http://localhost:8080/swagger-ui.html"
+          echo ""
+          echo "Keycloak:"
+          echo "http://localhost:9080"

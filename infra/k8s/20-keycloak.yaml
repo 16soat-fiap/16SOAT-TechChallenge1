@@ -58,6 +58,10 @@ spec:
               value: "true"
             - name: KC_PROXY_HEADERS
               value: xforwarded
+            # Limita o heap da JVM para evitar OOMKill dentro do container.
+            # O Quarkus/Keycloak não herda automaticamente o cgroup memory limit.
+            - name: JAVA_OPTS_APPEND
+              value: "-Xms256m -Xmx896m"
           envFrom:
             - secretRef:
                 name: keycloak-secrets
@@ -72,31 +76,39 @@ spec:
           # O boot do Keycloak passa de 2 minutos (augmentation do Quarkus +
           # import do realm). A startupProbe absorve isso sem afrouxar a
           # liveness, que segue rígida depois que o pod está de pé.
+          #
+          # IMPORTANTE: timeoutSeconds: 5 é necessário porque durante a
+          # augmentation do Quarkus o endpoint /health/started pode demorar
+          # mais de 1s (padrão) para responder, consumindo o failureThreshold
+          # prematuramente e derrubando o pod antes de concluir o startup.
           startupProbe:
             httpGet:
               path: /health/started
               port: http
-            periodSeconds: 5
-            initialDelaySeconds: 30
-            failureThreshold: 96      # até 8 minutos para subir (30s inicial + 96x5s = 510s)
+            initialDelaySeconds: 60   # aguarda augmentation do Quarkus antes do 1º check
+            periodSeconds: 10
+            timeoutSeconds: 5         # padrão 1s é muito curto durante inicialização
+            failureThreshold: 60      # 60s inicial + 60×10s = 660s ≈ 11 min para subir
           readinessProbe:
             httpGet:
               path: /health/ready
               port: http
             periodSeconds: 10
-            timeoutSeconds: 3
+            timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health/live
               port: http
             periodSeconds: 20
-            timeoutSeconds: 3
+            timeoutSeconds: 5
+            failureThreshold: 5
           resources:
             requests:
               cpu: 250m
               memory: 512Mi
             limits:
-              memory: 1Gi
+              memory: 1500Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

@@ -412,7 +412,7 @@ jobs:
           if ! kubectl rollout status \
             deployment/keycloak \
             -n ${K8S_NAMESPACE} \
-            --timeout=10m; then
+            --timeout=13m; then
             echo ""
             echo "=========================================="
             echo "FALHA NO ROLLOUT DO KEYCLOAK"

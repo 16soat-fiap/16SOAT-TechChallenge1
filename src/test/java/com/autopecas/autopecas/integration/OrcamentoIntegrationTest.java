@@ -111,7 +111,7 @@ class OrcamentoIntegrationTest extends IntegrationTestBase {
     private UUID criarOSEmAguardandoAprovacao() throws Exception {
         // Cria OS
         OrdemServicoCreateDTO dtoOS = new OrdemServicoCreateDTO(
-                clienteId, veiculoId, "Correia fazendo barulho", null, null);
+                clienteId, veiculoId, "Correia fazendo barulho", null, null, null, null);
         String respOS = mockMvc.perform(post("/api/ordens-servico")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(dtoOS)))

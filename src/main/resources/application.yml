@@ -17,3 +17,17 @@ spring:
 
   jackson:
     time-zone: UTC
+
+# Notificação de mudança de status da OS ao cliente.
+#
+# O envio real só ocorre quando um servidor SMTP é configurado — o Spring Boot só autoconfigura
+# o JavaMailSender quando `spring.mail.host` existe. Por isso a chave NÃO é declarada aqui: sem
+# ela, o adapter registra a notificação em log e a aplicação sobe sem depender de SMTP.
+#
+# Para ativar o envio, defina as variáveis (relaxed binding do Spring Boot):
+#   SPRING_MAIL_HOST, SPRING_MAIL_PORT, SPRING_MAIL_USERNAME, SPRING_MAIL_PASSWORD
+#   SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=true
+#   SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=true
+notificacoes:
+  email:
+    remetente: ${MAIL_REMETENTE:nao-responda@autopecas.local}

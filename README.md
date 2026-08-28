@@ -220,7 +220,7 @@ infra/
 
 | Enum                      | Valores                                                    |
 |---------------------------|------------------------------------------------------------|
-| `StatusOS`                | `ABERTA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `APROVADA`, `EM_EXECUCAO`, `CONCLUIDA`, `CANCELADA` |
+| `StatusOS`                | `RECEBIDA`, `EM_DIAGNOSTICO`, `AGUARDANDO_APROVACAO`, `EM_EXECUCAO`, `FINALIZADA`, `ENTREGUE` |
 | `StatusOrcamento`         | `RASCUNHO`, `ENVIADO`, `APROVADO`, `REJEITADO`             |
 | `StatusItemOS`            | `PENDENTE`, `EM_EXECUCAO`, `CONCLUIDO`                     |
 | `TipoCliente`             | `PF`, `PJ`                                                 |
@@ -451,6 +451,47 @@ A documentação interativa completa está disponível via Swagger após subir a
 † O `CLIENTE` só acessa a OS que é dele: na listagem, apenas com `clienteId` igual ao seu; na
 busca por número, apenas se a OS for do seu cadastro.
 
+#### Abertura com serviços e peças
+
+`POST /api/ordens-servico` aceita, além dos dados de recepção, os serviços e peças já acordados
+no balcão. Ambos são opcionais e entram ao **preço vigente no catálogo**, copiado no momento da
+abertura — uma alteração posterior de preço não muda retroativamente o que foi combinado.
+
+```json
+{
+  "clienteId": "…", "veiculoId": "…",
+  "queixaCliente": "Barulho no motor ao acelerar",
+  "observacoesEntrada": "Veículo entrou pela manhã",
+  "quilometragemEntrada": 45000,
+  "itensServico": [{ "servicoId": "…", "quantidade": 2 }],
+  "itensPeca":    [{ "pecaId": "…",    "quantidade": 1 }]
+}
+```
+
+A resposta traz `id` e `numero` (formato `OS-XXXXXX`, de uma sequence do PostgreSQL) — a
+identificação única da OS.
+
+> **Os itens da abertura não baixam estoque.** A baixa continua acontecendo na aprovação do
+> orçamento, que é quando a peça é de fato comprometida. Debitar nos dois momentos contaria a
+> mesma saída duas vezes.
+
+#### Listagem: a fila de trabalho
+
+`GET /api/ordens-servico` **sem** o parâmetro `status` devolve a fila operacional da oficina:
+
+- **Exclui logicamente** as OS `FINALIZADA` e `ENTREGUE` — elas continuam no banco e seguem
+  acessíveis por busca direta (`GET /api/ordens-servico/{numero}`) ou por filtro explícito.
+- **Ordena por urgência:** `EM_EXECUCAO` → `AGUARDANDO_APROVACAO` → `EM_DIAGNOSTICO` →
+  `RECEBIDA`, e dentro de cada faixa as **mais antigas primeiro**.
+- A ordenação é fixa: o parâmetro `sort` é ignorado nesse modo. A prioridade da oficina é regra
+  de negócio, não preferência de quem chama.
+
+Informar `status` é opt-in explícito e devolve exatamente aquele status — encerrado ou não —
+aí sim respeitando o `sort` da requisição. `clienteId` e `mecanicoId` apenas estreitam o recorte.
+
+A regra vive em `StatusOS.prioridadeNaFila()` / `emAndamento()`; a query JPQL a materializa num
+`CASE`, e `StatusOSFilaTest` compara os dois lados para que não divirjam silenciosamente.
+
 ### Orçamentos — `/api/ordens-servico/{osId}/orcamentos`
 
 | Método  | Endpoint                                               | Roles                            | Descrição                    |
@@ -462,6 +503,33 @@ busca por número, apenas se a OS for do seu cadastro.
 | `PATCH` | `/api/ordens-servico/{osId}/orcamentos/{id}/rejeitar`  | `ADMIN`, `ATENDENTE`, `CLIENTE`† | Rejeita orçamento            |
 
 † Somente o `CLIENTE` dono da OS informada em `{osId}`.
+
+### Notificação de status por e-mail
+
+Todo avanço de status via `PATCH /api/ordens-servico/{id}/status` dispara um aviso ao cliente,
+desde que ele tenha `email` cadastrado e `aceitaNotificacoes = true`.
+
+O canal é uma outbound port (`NotificadorDeStatusOS`), então trocar e-mail por SMS ou push não
+toca no caso de uso. Duas garantias no contrato:
+
+- **A notificação nunca derruba a operação.** Ela é enviada **fora da transação**, depois do
+  commit, e o adapter registra falhas em log em vez de propagar. Um servidor SMTP fora do ar não
+  pode reverter um avanço de status que a oficina já executou no mundo real.
+- **Sem SMTP configurado, a aplicação sobe normalmente.** O Spring Boot só autoconfigura o
+  `JavaMailSender` quando `spring.mail.host` existe; sem ele o adapter apenas registra o aviso em
+  log. É o comportamento padrão no Compose e nos testes.
+
+Para ativar o envio real:
+
+```bash
+SPRING_MAIL_HOST=smtp.exemplo.com
+SPRING_MAIL_PORT=587
+SPRING_MAIL_USERNAME=usuario
+SPRING_MAIL_PASSWORD=senha
+SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH=true
+SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE=true
+MAIL_REMETENTE=nao-responda@suaoficina.com
+```
 
 ### Dashboard — `/api/dashboard`
 
@@ -1098,6 +1166,11 @@ confere se o mapeamento bate com o banco.
 | `KEYCLOAK_AUTH_SERVER_URL` | ConfigMap        | URL base do Keycloak (documentação/health)             |
 | `KEYCLOAK_REALM`           | ConfigMap        | Nome do realm                                          |
 | `JAVA_OPTS`                | ConfigMap        | Flags extras da JVM                                    |
+| `SPRING_MAIL_HOST`         | ConfigMap        | SMTP das notificações. **Ausente = modo log**          |
+| `SPRING_MAIL_PORT`         | ConfigMap        | Porta do SMTP                                          |
+| `MAIL_REMETENTE`           | ConfigMap        | Endereço no campo `From`                               |
+| `SPRING_MAIL_USERNAME`     | **Secret**       | Usuário do SMTP                                        |
+| `SPRING_MAIL_PASSWORD`     | **Secret**       | Senha do SMTP                                          |
 
 O critério da divisão: se o valor pode aparecer num `kubectl describe` sem causar dano, é
 ConfigMap. Endereços são endereços; credenciais vão para o Secret.

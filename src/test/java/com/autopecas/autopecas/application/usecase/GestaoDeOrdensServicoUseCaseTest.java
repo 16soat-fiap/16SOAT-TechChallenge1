@@ -11,16 +11,24 @@ import com.autopecas.autopecas.application.port.out.ClienteRepositorio;
 import com.autopecas.autopecas.application.port.out.ConsultaOrdemServico;
 import com.autopecas.autopecas.application.port.out.FuncionarioRepositorio;
 import com.autopecas.autopecas.application.port.out.HistoricoStatusOSRepositorio;
+import com.autopecas.autopecas.application.port.out.NotificadorDeStatusOS;
 import com.autopecas.autopecas.application.port.out.OrdemServicoRepositorio;
+import com.autopecas.autopecas.application.port.out.PecaRepositorio;
+import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.domain.enums.StatusOS;
 import com.autopecas.autopecas.domain.exception.BusinessException;
 import com.autopecas.autopecas.domain.exception.ResourceNotFoundException;
+import com.autopecas.autopecas.domain.model.cliente.Cliente;
+import com.autopecas.autopecas.domain.model.cliente.ClientePF;
+import com.autopecas.autopecas.domain.model.estoque.Peca;
+import com.autopecas.autopecas.domain.model.estoque.Servico;
 import com.autopecas.autopecas.domain.model.funcionario.Atendente;
 import com.autopecas.autopecas.domain.model.funcionario.Mecanico;
 import com.autopecas.autopecas.domain.model.os.HistoricoStatusOS;
 import com.autopecas.autopecas.domain.model.os.OrdemServico;
 import com.autopecas.autopecas.domain.model.veiculo.Veiculo;
+import com.autopecas.autopecas.domain.vo.CPF;
 import com.autopecas.autopecas.domain.vo.Placa;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -51,6 +59,8 @@ class GestaoDeOrdensServicoUseCaseTest {
     private static final UUID OS_ID = UUID.randomUUID();
     private static final UUID CLIENTE_ID = UUID.randomUUID();
     private static final UUID VEICULO_ID = UUID.randomUUID();
+    private static final UUID SERVICO_ID = UUID.randomUUID();
+    private static final UUID PECA_ID = UUID.randomUUID();
 
     @Mock
     private OrdemServicoRepositorio ordemServicoRepositorio;
@@ -64,6 +74,12 @@ class GestaoDeOrdensServicoUseCaseTest {
     private FuncionarioRepositorio funcionarioRepositorio;
     @Mock
     private HistoricoStatusOSRepositorio historicoRepositorio;
+    @Mock
+    private ServicoRepositorio servicoRepositorio;
+    @Mock
+    private PecaRepositorio pecaRepositorio;
+    @Mock
+    private NotificadorDeStatusOS notificador;
 
     private GestaoDeOrdensServico gestao;
 
@@ -71,6 +87,7 @@ class GestaoDeOrdensServicoUseCaseTest {
     void setUp() {
         gestao = new GestaoDeOrdensServicoUseCase(ordemServicoRepositorio, consultaOrdemServico,
                 clienteRepositorio, veiculoRepositorio, funcionarioRepositorio, historicoRepositorio,
+                servicoRepositorio, pecaRepositorio, notificador,
                 new GeradorNumeroOSFixo(), new RelogioFixo(), new TransacaoDireta());
     }
 
@@ -95,6 +112,23 @@ class GestaoDeOrdensServicoUseCaseTest {
                 "ana@oficina.com", null, null, true, null);
     }
 
+    private static Servico servico() {
+        return Servico.reconstituir(SERVICO_ID, "Troca de óleo", null, new BigDecimal("150.00"),
+                60, true);
+    }
+
+    private static Peca peca() {
+        return Peca.reconstituir(PECA_ID, "P-001", "Filtro de óleo", null, "Bosch",
+                new BigDecimal("80.00"), 10, 2, "un", true, RelogioFixo.INSTANTE,
+                RelogioFixo.INSTANTE);
+    }
+
+    /** Cliente que aceita notificações — o caminho em que o aviso de status é disparado. */
+    private static Cliente clienteNotificavel() {
+        return ClientePF.reconstituir(CLIENTE_ID, "Maria", "maria@cliente.com", null, true, true,
+                null, new CPF("52998224725"), null, null, null, null);
+    }
+
     @Nested
     @DisplayName("Abertura")
     class Abertura {
@@ -110,7 +144,7 @@ class GestaoDeOrdensServicoUseCaseTest {
             when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
 
             gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID, VEICULO_ID, "Barulho no motor",
-                    null, 50000, "ana@oficina.com"));
+                    null, 50000, "ana@oficina.com", null, null));
 
             ArgumentCaptor<OrdemServico> osSalva = ArgumentCaptor.forClass(OrdemServico.class);
             verify(ordemServicoRepositorio).salvar(osSalva.capture());
@@ -136,7 +170,7 @@ class GestaoDeOrdensServicoUseCaseTest {
             when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
 
             gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID, VEICULO_ID, "Barulho", null,
-                    null, null));
+                    null, null, null, null));
 
             ArgumentCaptor<HistoricoStatusOS> historico =
                     ArgumentCaptor.forClass(HistoricoStatusOS.class);
@@ -157,7 +191,7 @@ class GestaoDeOrdensServicoUseCaseTest {
             when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
 
             gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID, VEICULO_ID, "Barulho", null,
-                    null, "carlos@oficina.com"));
+                    null, "carlos@oficina.com", null, null));
 
             ArgumentCaptor<OrdemServico> osSalva = ArgumentCaptor.forClass(OrdemServico.class);
             verify(ordemServicoRepositorio).salvar(osSalva.capture());
@@ -170,7 +204,7 @@ class GestaoDeOrdensServicoUseCaseTest {
             when(clienteRepositorio.existePorId(CLIENTE_ID)).thenReturn(false);
 
             assertThatThrownBy(() -> gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID,
-                    VEICULO_ID, "Barulho", null, null, null)))
+                    VEICULO_ID, "Barulho", null, null, null, null, null)))
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("Cliente não encontrado");
 
@@ -184,9 +218,72 @@ class GestaoDeOrdensServicoUseCaseTest {
             when(veiculoRepositorio.porIdAtivo(VEICULO_ID)).thenReturn(Optional.empty());
 
             assertThatThrownBy(() -> gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID,
-                    VEICULO_ID, "Barulho", null, null, null)))
+                    VEICULO_ID, "Barulho", null, null, null, null, null)))
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("Veículo inativo ou não encontrado");
+        }
+
+        @Test
+        @DisplayName("deve lançar os serviços e peças informados, ao preço vigente no catálogo")
+        void deveAbrirComItens() {
+            when(clienteRepositorio.existePorId(CLIENTE_ID)).thenReturn(true);
+            when(veiculoRepositorio.porIdAtivo(VEICULO_ID)).thenReturn(Optional.of(veiculo()));
+            when(servicoRepositorio.porId(SERVICO_ID)).thenReturn(Optional.of(servico()));
+            when(pecaRepositorio.porId(PECA_ID)).thenReturn(Optional.of(peca()));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(osNoStatus(StatusOS.RECEBIDA));
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+
+            gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID, VEICULO_ID, "Barulho", null,
+                    null, null,
+                    List.of(new GestaoDeOrdensServico.Abrir.ItemServico(SERVICO_ID, 2)),
+                    List.of(new GestaoDeOrdensServico.Abrir.ItemPeca(PECA_ID, null))));
+
+            ArgumentCaptor<OrdemServico> osSalva = ArgumentCaptor.forClass(OrdemServico.class);
+            verify(ordemServicoRepositorio).salvar(osSalva.capture());
+
+            assertThat(osSalva.getValue().getItensServico()).singleElement().satisfies(item -> {
+                assertThat(item.getServicoId()).isEqualTo(SERVICO_ID);
+                assertThat(item.getQuantidade()).isEqualTo(2);
+                assertThat(item.getPrecoUnitario()).isEqualByComparingTo("150.00");
+            });
+            // quantidade omitida assume 1, mesma convenção do orçamento
+            assertThat(osSalva.getValue().getItensPeca()).singleElement().satisfies(item -> {
+                assertThat(item.getPecaId()).isEqualTo(PECA_ID);
+                assertThat(item.getQuantidade()).isEqualTo(1);
+                assertThat(item.getPrecoUnitario()).isEqualByComparingTo("80.00");
+            });
+        }
+
+        @Test
+        @DisplayName("os itens da abertura não baixam estoque — a baixa é na aprovação do orçamento")
+        void itensNaAberturaNaoMovimentamEstoque() {
+            when(clienteRepositorio.existePorId(CLIENTE_ID)).thenReturn(true);
+            when(veiculoRepositorio.porIdAtivo(VEICULO_ID)).thenReturn(Optional.of(veiculo()));
+            when(pecaRepositorio.porId(PECA_ID)).thenReturn(Optional.of(peca()));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(osNoStatus(StatusOS.RECEBIDA));
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+
+            gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID, VEICULO_ID, "Barulho", null,
+                    null, null, null,
+                    List.of(new GestaoDeOrdensServico.Abrir.ItemPeca(PECA_ID, 3))));
+
+            verify(pecaRepositorio, never()).salvar(any());
+        }
+
+        @Test
+        @DisplayName("deve falhar quando a peça informada não existe")
+        void deveFalharComPecaInexistente() {
+            when(clienteRepositorio.existePorId(CLIENTE_ID)).thenReturn(true);
+            when(veiculoRepositorio.porIdAtivo(VEICULO_ID)).thenReturn(Optional.of(veiculo()));
+            when(pecaRepositorio.porId(PECA_ID)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> gestao.abrir(new GestaoDeOrdensServico.Abrir(CLIENTE_ID,
+                    VEICULO_ID, "Barulho", null, null, null, null,
+                    List.of(new GestaoDeOrdensServico.Abrir.ItemPeca(PECA_ID, 1)))))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Peça não encontrada");
+
+            verify(ordemServicoRepositorio, never()).salvar(any());
         }
     }
 
@@ -238,6 +335,82 @@ class GestaoDeOrdensServicoUseCaseTest {
 
             verify(historicoRepositorio, never()).salvar(any());
             verify(ordemServicoRepositorio, never()).salvar(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Notificação de status ao cliente")
+    class NotificacaoDeStatus {
+
+        private void avancoValido() {
+            OrdemServico os = osNoStatus(StatusOS.RECEBIDA);
+            when(ordemServicoRepositorio.porId(OS_ID)).thenReturn(Optional.of(os));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(os);
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+        }
+
+        @Test
+        @DisplayName("deve notificar o cliente com o status anterior e o novo")
+        void deveNotificar() {
+            avancoValido();
+            when(clienteRepositorio.porId(CLIENTE_ID)).thenReturn(Optional.of(clienteNotificavel()));
+
+            gestao.avancarStatus(OS_ID, new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO",
+                    "Veículo na baia 3", null));
+
+            ArgumentCaptor<NotificadorDeStatusOS.MudancaDeStatus> aviso =
+                    ArgumentCaptor.forClass(NotificadorDeStatusOS.MudancaDeStatus.class);
+            verify(notificador).notificarMudancaDeStatus(aviso.capture());
+            assertThat(aviso.getValue().numeroOS()).isEqualTo("OS-000001");
+            assertThat(aviso.getValue().statusAnterior()).isEqualTo("RECEBIDA");
+            assertThat(aviso.getValue().emailCliente()).isEqualTo("maria@cliente.com");
+            assertThat(aviso.getValue().observacao()).isEqualTo("Veículo na baia 3");
+        }
+
+        @Test
+        @DisplayName("não deve notificar quem recusou notificações")
+        void naoNotificaQuemRecusou() {
+            avancoValido();
+            Cliente semAviso = ClientePF.reconstituir(CLIENTE_ID, "Maria", "maria@cliente.com", null,
+                    false, true, null, new CPF("52998224725"), null, null, null, null);
+            when(clienteRepositorio.porId(CLIENTE_ID)).thenReturn(Optional.of(semAviso));
+
+            gestao.avancarStatus(OS_ID,
+                    new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            verify(notificador, never()).notificarMudancaDeStatus(any());
+        }
+
+        @Test
+        @DisplayName("não deve notificar cliente sem e-mail cadastrado")
+        void naoNotificaSemEmail() {
+            avancoValido();
+            Cliente semEmail = ClientePF.reconstituir(CLIENTE_ID, "Maria", null, null, true, true,
+                    null, new CPF("52998224725"), null, null, null, null);
+            when(clienteRepositorio.porId(CLIENTE_ID)).thenReturn(Optional.of(semEmail));
+
+            gestao.avancarStatus(OS_ID,
+                    new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            verify(notificador, never()).notificarMudancaDeStatus(any());
+        }
+
+        @Test
+        @DisplayName("falha ao notificar não desfaz o avanço de status")
+        void falhaAoNotificarNaoQuebraOAvanco() {
+            OrdemServico os = osNoStatus(StatusOS.RECEBIDA);
+            when(ordemServicoRepositorio.porId(OS_ID)).thenReturn(Optional.of(os));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(os);
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+            when(clienteRepositorio.porId(CLIENTE_ID))
+                    .thenThrow(new IllegalStateException("banco fora do ar"));
+
+            OrdemServicoView resultado = gestao.avancarStatus(OS_ID,
+                    new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            assertThat(resultado).isNotNull();
+            assertThat(os.getStatus()).isEqualTo(StatusOS.EM_DIAGNOSTICO);
+            verify(ordemServicoRepositorio).salvar(any());
         }
     }
 

@@ -17,6 +17,15 @@ import java.util.UUID;
  */
 public interface ConsultaOrdemServico {
 
+    /**
+     * Lista as OS conforme o filtro.
+     *
+     * <p>Quando {@link Filtro#status()} é nulo, o resultado é a <b>fila de trabalho</b>: exclui
+     * logicamente as OS encerradas ({@link StatusOS#encerrouAtendimento()}) e ordena por
+     * {@link StatusOS#prioridadeNaFila()}, com as mais antigas primeiro dentro de cada faixa.
+     * Nesse modo a ordenação é fixa e ignora o sort da requisição — a prioridade da oficina não
+     * é preferência de quem chama.
+     */
     Pagina<OrdemServicoView> listar(Filtro filtro, PaginaRequisicao paginacao);
 
     Optional<OrdemServicoView> porNumero(String numero);
@@ -31,6 +40,11 @@ public interface ConsultaOrdemServico {
 
         public static Filtro vazio() {
             return new Filtro(null, null, null);
+        }
+
+        /** Sem status explícito, a listagem é a fila: encerradas fora, prioridade aplicada. */
+        public boolean ehFilaDeTrabalho() {
+            return status == null;
         }
     }
 }

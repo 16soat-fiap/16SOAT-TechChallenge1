@@ -93,6 +93,15 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!--
+			Notificação de mudança de status da OS. O JavaMailSender só é autoconfigurado quando
+			spring.mail.host está definido; sem isso o adapter cai no modo log, e nem o Compose
+			nem os testes precisam de um servidor SMTP.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

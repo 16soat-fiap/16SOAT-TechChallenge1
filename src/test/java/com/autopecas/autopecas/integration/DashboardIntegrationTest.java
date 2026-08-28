@@ -71,7 +71,7 @@ class DashboardIntegrationTest extends IntegrationTestBase {
 
     private UUID criarOS(UUID clienteId, UUID veiculoId) throws Exception {
         OrdemServicoCreateDTO dto = new OrdemServicoCreateDTO(
-                clienteId, veiculoId, "Verificação geral", null, null);
+                clienteId, veiculoId, "Verificação geral", null, null, null, null);
         String resp = mockMvc.perform(post("/api/ordens-servico")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(dto)))

@@ -79,7 +79,8 @@ public class OrdemServicoController {
             Authentication authentication) {
         var comando = new GestaoDeOrdensServico.Abrir(dto.clienteId(), dto.veiculoId(),
                 dto.queixaCliente(), dto.observacoesEntrada(), dto.quilometragemEntrada(),
-                emailDe(authentication));
+                emailDe(authentication), mapper.paraItensServico(dto.itensServico()),
+                mapper.paraItensPeca(dto.itensPeca()));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(mapper.paraResposta(gestaoDeOrdensServico.abrir(comando)));
     }

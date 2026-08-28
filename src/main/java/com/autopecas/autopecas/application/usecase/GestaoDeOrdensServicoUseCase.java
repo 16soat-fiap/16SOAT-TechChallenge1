@@ -9,21 +9,31 @@ import com.autopecas.autopecas.application.port.out.ConsultaOrdemServico;
 import com.autopecas.autopecas.application.port.out.FuncionarioRepositorio;
 import com.autopecas.autopecas.application.port.out.GeradorNumeroOS;
 import com.autopecas.autopecas.application.port.out.HistoricoStatusOSRepositorio;
+import com.autopecas.autopecas.application.port.out.NotificadorDeStatusOS;
 import com.autopecas.autopecas.application.port.out.OrdemServicoRepositorio;
+import com.autopecas.autopecas.application.port.out.PecaRepositorio;
 import com.autopecas.autopecas.application.port.out.Relogio;
+import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.Transacao;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.domain.enums.StatusOS;
 import com.autopecas.autopecas.domain.exception.BusinessException;
 import com.autopecas.autopecas.domain.exception.ResourceNotFoundException;
+import com.autopecas.autopecas.domain.model.cliente.Cliente;
+import com.autopecas.autopecas.domain.model.estoque.Peca;
+import com.autopecas.autopecas.domain.model.estoque.Servico;
 import com.autopecas.autopecas.domain.model.funcionario.Atendente;
 import com.autopecas.autopecas.domain.model.funcionario.Funcionario;
 import com.autopecas.autopecas.domain.model.funcionario.Mecanico;
 import com.autopecas.autopecas.domain.model.os.HistoricoStatusOS;
+import com.autopecas.autopecas.domain.model.os.ItemPecaOS;
+import com.autopecas.autopecas.domain.model.os.ItemServicoOS;
 import com.autopecas.autopecas.domain.model.os.OrdemServico;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Casos de uso do agregado OrdemServico.
@@ -34,12 +44,18 @@ import java.util.UUID;
  */
 public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
+    /** Mesma convenção do orçamento: quantidade omitida vale 1. */
+    private static final int QUANTIDADE_PADRAO = 1;
+
     private final OrdemServicoRepositorio ordemServicoRepositorio;
     private final ConsultaOrdemServico consultaOrdemServico;
     private final ClienteRepositorio clienteRepositorio;
     private final VeiculoRepositorio veiculoRepositorio;
     private final FuncionarioRepositorio funcionarioRepositorio;
     private final HistoricoStatusOSRepositorio historicoRepositorio;
+    private final ServicoRepositorio servicoRepositorio;
+    private final PecaRepositorio pecaRepositorio;
+    private final NotificadorDeStatusOS notificador;
     private final GeradorNumeroOS geradorNumeroOS;
     private final Relogio relogio;
     private final Transacao transacao;
@@ -50,9 +66,15 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
                                         VeiculoRepositorio veiculoRepositorio,
                                         FuncionarioRepositorio funcionarioRepositorio,
                                         HistoricoStatusOSRepositorio historicoRepositorio,
+                                        ServicoRepositorio servicoRepositorio,
+                                        PecaRepositorio pecaRepositorio,
+                                        NotificadorDeStatusOS notificador,
                                         GeradorNumeroOS geradorNumeroOS,
                                         Relogio relogio,
                                         Transacao transacao) {
+        this.servicoRepositorio = servicoRepositorio;
+        this.pecaRepositorio = pecaRepositorio;
+        this.notificador = notificador;
         this.ordemServicoRepositorio = ordemServicoRepositorio;
         this.consultaOrdemServico = consultaOrdemServico;
         this.clienteRepositorio = clienteRepositorio;
@@ -96,6 +118,9 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
                     comando.veiculoId(), comando.queixaCliente(), comando.observacoesEntrada(),
                     comando.quilometragemEntrada(), atendenteId);
 
+            adicionarItensDeServico(os, comando.itensServico());
+            adicionarItensDePeca(os, comando.itensPeca());
+
             OrdemServico salva = ordemServicoRepositorio.salvar(os);
 
             HistoricoStatusOS historico = atendente != null
@@ -112,9 +137,14 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
     public OrdemServicoView avancarStatus(UUID id, AvancarStatus comando) {
         StatusOS novoStatus = converterStatus(comando.novoStatus());
 
-        return transacao.executar(() -> {
+        // Guarda o status de origem para compor a notificação, sem precisar de um tipo novo
+        // neste pacote — onde toda classe é, por regra de arquitetura, um caso de uso.
+        AtomicReference<StatusOS> statusDeOrigem = new AtomicReference<>();
+
+        OrdemServicoView viewAtualizada = transacao.executar(() -> {
             OrdemServico os = buscar(id);
             StatusOS statusAnterior = os.getStatus();
+            statusDeOrigem.set(statusAnterior);
 
             os.avancarStatus(novoStatus, relogio.agora());
             OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
@@ -132,6 +162,35 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
             return recarregarView(atualizada.getId());
         });
+
+        // Fora da transação de propósito: a notificação é consequência da mudança já confirmada.
+        // Notificar dentro do commit faria uma indisponibilidade do servidor de e-mail reverter
+        // um avanço de status que a oficina já executou no mundo real.
+        notificarCliente(viewAtualizada, statusDeOrigem.get(), comando.observacao());
+        return viewAtualizada;
+    }
+
+    /**
+     * Avisa o cliente da mudança de status, quando ele aceita notificações e tem e-mail.
+     *
+     * <p>O contrato da port proíbe a implementação de lançar; o try/catch aqui é a segunda
+     * barreira, cobrindo também a leitura do cliente — nenhuma delas pode transformar um avanço
+     * de status bem-sucedido em erro para quem chamou a API.
+     */
+    private void notificarCliente(OrdemServicoView view, StatusOS statusAnterior, String observacao) {
+        try {
+            Cliente cliente = clienteRepositorio.porId(view.clienteId()).orElse(null);
+            if (cliente == null || !cliente.isAceitaNotificacoes()
+                    || cliente.getEmail() == null || cliente.getEmail().isBlank()) {
+                return;
+            }
+            notificador.notificarMudancaDeStatus(new NotificadorDeStatusOS.MudancaDeStatus(
+                    view.numero(),
+                    statusAnterior != null ? statusAnterior.name() : null,
+                    view.status(), cliente.getNome(), cliente.getEmail(), observacao));
+        } catch (RuntimeException e) {
+            // Silenciar é intencional: ver javadoc de NotificadorDeStatusOS.
+        }
     }
 
     @Override
@@ -160,6 +219,46 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
             OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
             return recarregarView(atualizada.getId());
         });
+    }
+
+    /**
+     * Lança na OS os serviços já acordados na recepção, ao preço vigente no catálogo.
+     *
+     * <p>O preço é copiado, não referenciado: uma alteração futura no catálogo não pode mudar
+     * retroativamente o que foi combinado com o cliente.
+     */
+    private void adicionarItensDeServico(OrdemServico os, List<Abrir.ItemServico> itens) {
+        if (itens == null) {
+            return;
+        }
+        for (Abrir.ItemServico item : itens) {
+            Servico servico = servicoRepositorio.porId(item.servicoId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Serviço não encontrado com ID: " + item.servicoId()));
+            os.adicionarItemServico(ItemServicoOS.criar(servico.getId(),
+                    quantidadeOuPadrao(item.quantidade()), servico.getPrecoBase()));
+        }
+    }
+
+    /**
+     * Lança na OS as peças previstas na recepção. Não há baixa de estoque aqui — ver o javadoc
+     * de {@link Abrir}.
+     */
+    private void adicionarItensDePeca(OrdemServico os, List<Abrir.ItemPeca> itens) {
+        if (itens == null) {
+            return;
+        }
+        for (Abrir.ItemPeca item : itens) {
+            Peca peca = pecaRepositorio.porId(item.pecaId())
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Peça não encontrada com ID: " + item.pecaId()));
+            os.adicionarItemPeca(ItemPecaOS.criar(peca.getId(),
+                    quantidadeOuPadrao(item.quantidade()), peca.getPrecoVenda()));
+        }
+    }
+
+    private int quantidadeOuPadrao(Integer quantidade) {
+        return quantidade != null ? quantidade : QUANTIDADE_PADRAO;
     }
 
     private OrdemServico buscar(UUID id) {

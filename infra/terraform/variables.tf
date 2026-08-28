@@ -69,6 +69,11 @@ variable "postgres_password" {
   type        = string
   default     = "postgres"
   sensitive   = true
+
+  validation {
+    condition     = length(var.postgres_password) >= 8
+    error_message = "postgres_password deve ter pelo menos 8 caracteres."
+  }
 }
 
 variable "app_database" {

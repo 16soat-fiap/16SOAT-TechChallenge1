@@ -194,7 +194,7 @@ resource "kubernetes_stateful_set" "postgres" {
 
   # Sem isto o Terraform considera o StatefulSet pronto assim que a API aceita
   # o objeto, e o Keycloak subiria antes do banco existir.
-  wait_for_rollout = true
+  wait_for_rollout = false
 }
 
 resource "kubernetes_service" "postgres" {

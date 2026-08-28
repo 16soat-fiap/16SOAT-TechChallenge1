@@ -77,7 +77,8 @@ spec:
               path: /health/started
               port: http
             periodSeconds: 5
-            failureThreshold: 60      # até 5 minutos para subir
+            initialDelaySeconds: 30
+            failureThreshold: 96      # até 8 minutos para subir (30s inicial + 96x5s = 510s)
           readinessProbe:
             httpGet:
               path: /health/ready

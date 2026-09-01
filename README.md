@@ -23,6 +23,15 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Autoscaling](#autoscaling-como-verificar)
   - [Segredos em produção](#segredos-em-produção)
   - [Operação e diagnóstico](#operação-e-diagnóstico)
+- [CI/CD Local (Self-hosted Runner)](#-cicd-local-self-hosted-runner)
+  - [Como funciona o pipeline](#como-funciona-o-pipeline)
+  - [Pré-requisitos da máquina](#pré-requisitos-da-máquina)
+  - [Instalar o GitHub Actions Runner](#instalar-o-github-actions-runner)
+  - [Registrar o runner no repositório](#registrar-o-runner-no-repositório)
+  - [Iniciar o runner](#iniciar-o-runner)
+  - [Secret necessário](#secret-necessário)
+  - [Executar o pipeline manualmente](#executar-o-pipeline-manualmente)
+  - [Verificar o runner no GitHub](#verificar-o-runner-no-github)
 - [Testes e Cobertura](#-testes-e-cobertura)
 - [Análise de Qualidade (SonarQube)](#-análise-de-qualidade-sonarqube)
 - [Variáveis de Ambiente](#-variáveis-de-ambiente)
@@ -43,7 +52,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 | Mapeamento de Objetos        | MapStruct 1.5.5.Final + Lombok 1.18.38                  |
 | Documentação da API          | Springdoc OpenAPI UI (Swagger) 3.0.3                    |
 | Testes                       | JUnit 5 + Testcontainers (PostgreSQL real)              |
-| Fronteiras de Arquitetura    | ArchUnit 1.3.0 (11 regras, quebram a build)             |
+| Fronteiras de Arquitetura    | ArchUnit 1.3.0 (10 regras, quebram a build)             |
 | Cobertura de Código          | JaCoCo 0.8.12 (mínimo 80% de linhas)                   |
 | Análise de Qualidade         | SonarQube (Community Edition)                           |
 | Containerização              | Docker (build em 3 estágios) + Docker Compose           |
@@ -81,7 +90,7 @@ javac -d /tmp/dominio $(find src/main/java/com/autopecas/autopecas/domain -name 
 ```
 
 **Princípios aplicados:**
-- **Ports & Adapters:** 8 inbound ports (uma por agregado) e 15 outbound ports. A aplicação
+- **Ports & Adapters:** 9 inbound ports e 16 outbound ports. A aplicação
   declara o que precisa; quem implementa é sempre um adapter.
 - **Modelos ricos e encapsulados:** construtores privados, factory methods (`abrir`, `criar`,
   `reconstituir`), coleções imutáveis e **nenhum setter público** — a regra de negócio não pode
@@ -101,7 +110,7 @@ javac -d /tmp/dominio $(find src/main/java/com/autopecas/autopecas/domain -name 
   Spring ficam confinados ao adapter web, que remonta o envelope JSON original.
 - **CQRS-lite nas leituras:** listagens e dashboard usam *query ports* com projeção SQL, evitando
   o N+1 que existiria ao carregar agregados só para ler nome do cliente e placa.
-- **Fronteiras verificadas por ArchUnit:** 11 regras que quebram a build se alguém furar o
+- **Fronteiras verificadas por ArchUnit:** 10 regras que quebram a build se alguém furar o
   hexágono (ver `arquitetura/ArquiteturaHexagonalTest`).
 
 ---
@@ -127,11 +136,11 @@ src/main/java/com/autopecas/autopecas/
 │   └── service/                     # MovimentadorDeEstoque (domain service puro)
 │
 ├── application/                     # Depende SÓ de domain + JDK
-│   ├── port/in/                     # 8 inbound ports + commands aninhados
+│   ├── port/in/                     # 9 inbound ports + commands aninhados
 │   │   └── view/                    # Projeções de leitura (records)
-│   ├── port/out/                    # Repositórios, query ports, Relogio, geradores, Transacao
+│   ├── port/out/                    # Repositórios, query ports, Relogio, geradores, Transacao, Notificador
 │   ├── pagination/                  # PaginaRequisicao, Pagina
-│   └── usecase/                     # 8 casos de uso, sem anotação de framework
+│   └── usecase/                     # 9 casos de uso, sem anotação de framework
 │
 ├── adapter/
 │   ├── in/web/                      # Controllers REST, DTOs, mappers MapStruct, handler de erro
@@ -247,8 +256,9 @@ A autenticação é feita via **JWT emitido pelo Keycloak**. A aplicação atua 
 
 A role `CLIENTE` diz apenas *"é um cliente"*, não *"é o dono deste registro"*. Por isso, nos
 endpoints marcados com † nas tabelas abaixo, a autorização soma à role uma **checagem de
-propriedade**: `@PreAuthorize` chama o bean `@propriedade`, que resolve o cadastro do usuário
-autenticado e compara com o dono do recurso.
+propriedade**: `@PreAuthorize` chama o bean `@propriedade` (`PropriedadeDoRecurso`), que delega
+ao `ControleDeAcessoDoClienteUseCase` — a inbound port responsável por resolver o cadastro do
+usuário autenticado e comparar com o dono do recurso.
 
 O vínculo entre o usuário do Keycloak e o cadastro é o **e-mail**: o claim `email` do token é
 casado com `clientes.email` (coluna `UNIQUE`), considerando apenas clientes ativos. Um cliente
@@ -1066,6 +1076,172 @@ O profile `dev` difere do `prod` em dois pontos: `ddl-auto: none` (não valida o
 as entidades) e log SQL ligado.
 
 ---
+
+## 🔄 CI/CD Local (Self-hosted Runner)
+
+O pipeline de CI/CD está definido em `.github/workflows/ci-cd-local.yml` e é composto por três
+jobs executados em sequência:
+
+### Como funciona o pipeline
+
+```
+Push / Pull Request
+        │
+        ├──► build-test          (GitHub-hosted: ubuntu-latest)
+        │    ├── Checkout
+        │    ├── Java 21 + Maven
+        │    └── ./mvnw clean verify  (testes + JaCoCo + ArchUnit)
+        │
+        ├──► terraform-validation  (GitHub-hosted: ubuntu-latest)
+        │    ├── terraform init -backend=false
+        │    ├── terraform fmt -check
+        │    └── terraform validate
+        │
+        └──► deploy-local          (self-hosted: linux/x64/autopecas)
+             ├── Verificar ferramentas (java, docker, kind, kubectl, terraform)
+             ├── Criar/atualizar cluster Kind via Terraform
+             ├── docker build → kind load
+             ├── kubectl apply -f infra/k8s/
+             ├── Aguardar PostgreSQL, Keycloak e API
+             └── Health check em /actuator/health/readiness
+```
+
+- Os jobs `build-test` e `terraform-validation` rodam nos runners do GitHub e **não precisam de
+  nenhuma configuração local**.
+- O job `deploy-local` roda **somente em `push`** (nunca em Pull Request) e requer o
+  self-hosted runner instalado na máquina.
+
+---
+
+### Pré-requisitos da máquina
+
+Antes de registrar o runner, certifique-se de que as seguintes ferramentas estão instaladas e
+disponíveis no `PATH` do usuário que executará o runner:
+
+| Ferramenta     | Versão mínima | Verificar              |
+|----------------|---------------|------------------------|
+| Java (JDK)     | 21            | `java -version`        |
+| Docker Engine  | 24+           | `docker version`       |
+| Kind           | 0.23+         | `kind version`         |
+| kubectl        | 1.29+         | `kubectl version --client` |
+| Terraform      | 1.5+          | `terraform version`    |
+
+> **WSL2 (Windows):** todas as ferramentas devem estar instaladas **dentro do WSL**, não no
+> Windows host. O runner roda no Linux do WSL2 e o Docker precisa estar acessível sem `sudo`
+> (adicione o usuário ao grupo `docker`: `sudo usermod -aG docker $USER`).
+
+---
+
+### Instalar o GitHub Actions Runner
+
+O script `install-runner.sh` na raiz do projeto baixa e extrai o runner na versão correta:
+
+```bash
+chmod +x install-runner.sh
+./install-runner.sh
+```
+
+Isso cria `~/actions-runner/` com o binário do runner v2.336.0.
+
+---
+
+### Registrar o runner no repositório
+
+1. Acesse o repositório no GitHub → **Settings → Actions → Runners → New self-hosted runner**
+2. Copie o token exibido (válido por alguns minutos)
+3. Execute o comando de configuração:
+
+```bash
+cd ~/actions-runner
+./config.sh \
+  --url https://github.com/16soat-fiap/16SOAT-TechChallenge1 \
+  --token SEU_TOKEN_AQUI \
+  --labels autopecas \
+  --name meu-runner-local \
+  --unattended
+```
+
+> O label `autopecas` é **obrigatório** — o workflow seleciona o runner por
+> `runs-on: [self-hosted, linux, x64, autopecas]`.
+
+---
+
+### Iniciar o runner
+
+#### Em primeiro plano (para testar)
+
+```bash
+cd ~/actions-runner
+./run.sh
+```
+
+#### Como serviço systemd (para uso contínuo)
+
+```bash
+cd ~/actions-runner
+sudo ./svc.sh install
+sudo ./svc.sh start
+sudo ./svc.sh status
+```
+
+Para parar ou desinstalar:
+
+```bash
+sudo ./svc.sh stop
+sudo ./svc.sh uninstall
+```
+
+---
+
+### Secret necessário
+
+O job `deploy-local` usa o secret `POSTGRES_PASSWORD` na etapa do Terraform:
+
+```yaml
+env:
+  TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+```
+
+Cadastre-o em **Settings → Secrets and variables → Actions → New repository secret**:
+
+| Secret             | Valor sugerido (local) | Descrição                     |
+|--------------------|------------------------|-------------------------------|
+| `POSTGRES_PASSWORD`| `postgres`             | Senha do PostgreSQL no cluster|
+
+---
+
+### Executar o pipeline manualmente
+
+O workflow dispara automaticamente em `push` para `main`, `develop` ou
+`refactor/arquitetura-hexagonal`. Para disparar sem commit:
+
+1. Acesse **Actions → CI/CD - Autopecas API - Local Kubernetes**
+2. Clique em **Run workflow** → selecione a branch → **Run workflow**
+
+> O job `deploy-local` só é executado em `push` — um `workflow_dispatch` manual também aciona
+> o deploy.
+
+---
+
+### Verificar o runner no GitHub
+
+Após `./run.sh` ou o serviço estar ativo, o runner aparece como **Idle** em:
+
+**Settings → Actions → Runners**
+
+Se aparecer como **Offline**, verifique:
+
+| Sintoma | Causa provável | Solução |
+|---|---|---|
+| Runner Offline | Processo parado | `sudo ./svc.sh status` ou reinicie com `./run.sh` |
+| Job ignorado | Label errado | Confirme `--labels autopecas` no `config.sh` |
+| `docker: permission denied` | Usuário fora do grupo docker | `sudo usermod -aG docker $USER` e reabrir sessão |
+| `kind: command not found` | Kind não está no PATH do runner | Adicione ao PATH em `~/.profile` ou `~/.bashrc` |
+| `terraform: command not found` | Terraform não está no PATH | Mesmo que o anterior |
+| Deploy não ocorre em PR | Comportamento esperado | O deploy só roda em `push`, não em PR |
+
+---
+
 ## 🧪 Testes e Cobertura
 
 ### Executar os testes
@@ -1086,7 +1262,7 @@ O relatório HTML é gerado em `target/site/jacoco/index.html`.
 
 | Tipo                       | Descrição                                                                            |
 |----------------------------|--------------------------------------------------------------------------------------|
-| **Arquitetura (ArchUnit)** | 11 regras de fronteira: domínio sem framework, aplicação sem Spring, adapters isolados |
+| **Arquitetura (ArchUnit)** | 10 regras de fronteira: domínio sem framework, aplicação sem Spring, adapters isolados |
 | **Domínio**                | Agregados e Value Objects isolados — sem Spring, sem mocks, sem banco. Rodam em ms    |
 | **Casos de Uso**           | Dublês das *ports* do projeto (não de interfaces do Spring Data) + fakes de tempo e transação |
 | **Integração**             | Testcontainers sobe um PostgreSQL real; o schema vem das **mesmas migrations Flyway** de produção |

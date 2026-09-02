@@ -9,13 +9,30 @@ spring:
     driver-class-name: org.postgresql.Driver
 
   jpa:
+    open-in-view: false
     hibernate:
-      ddl-auto: create
+      # NUNCA `create` em produção: apagaria o schema a cada boot. Quem cria e evolui as
+      # tabelas é o Flyway; o Hibernate apenas confere se o mapeamento bate com o banco.
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${OAUTH2_JWK_URI:${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs}
+          issuer-uri: ${OAUTH2_ISSUER_URI:${KEYCLOAK_ISSUER_URI}}
 
 # ─────────────────────────────────────────────────────────────
 # Propriedades customizadas do Keycloak (usadas no código)
@@ -26,7 +43,7 @@ keycloak:
   client-id: ${KEYCLOAK_CLIENT_ID:autopecas-api}
 
   # URL base do Keycloak (usada apenas para documentação/health)
-  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:8081}
+  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9080}
   realm: ${KEYCLOAK_REALM:autopecas}
 
 # ─────────────────────────────────────────────────────────────
@@ -43,8 +60,32 @@ springdoc:
 
 server:
   port: 8080
+  shutdown: graceful
+
+spring.lifecycle.timeout-per-shutdown-phase: 20s
+
+# ─────────────────────────────────────────────────────────────
+# Actuator — só o necessário para as probes do Kubernetes e o
+# healthcheck do Compose. Em produção não se expõe "*": endpoints
+# como /env e /configprops vazam configuração, inclusive credenciais.
+# ─────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true       # habilita /actuator/health/{liveness,readiness}
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
 
 logging:
   level:
-    org.springframework.security: DEBUG   # útil para diagnosticar problemas de auth
+    org.springframework.security: INFO
     com.autopecas: INFO

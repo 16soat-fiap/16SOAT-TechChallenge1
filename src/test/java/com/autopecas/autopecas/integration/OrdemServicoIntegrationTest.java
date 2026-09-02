@@ -1,13 +1,13 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
-import com.autopecas.autopecas.dto.funcionario.AtendenteCreateDTO;
-import com.autopecas.autopecas.dto.funcionario.MecanicoCreateDTO;
-import com.autopecas.autopecas.dto.os.AtribuirMecanicoDTO;
-import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
-import com.autopecas.autopecas.dto.os.DiagnosticoDTO;
-import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
-import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePFDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.funcionario.AtendenteCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.funcionario.MecanicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AtribuirMecanicoDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AvancarStatusDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.DiagnosticoDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.OrdemServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.veiculo.VeiculoCreateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -100,7 +100,7 @@ class OrdemServicoIntegrationTest extends IntegrationTestBase {
         OrdemServicoCreateDTO dto = new OrdemServicoCreateDTO(
                 clienteId, veiculoId,
                 "Barulho no motor ao acelerar",
-                "Veículo entrou pela manhã", 45000);
+                "Veículo entrou pela manhã", 45000, null, null);
 
         return mockMvc.perform(post(BASE)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -129,7 +129,7 @@ class OrdemServicoIntegrationTest extends IntegrationTestBase {
             mockMvc.perform(post(BASE)
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(new OrdemServicoCreateDTO(
-                                    clienteId, veiculoId, "Troca de freios", null, null))))
+                                    clienteId, veiculoId, "Troca de freios", null, null, null, null))))
                     .andExpect(status().isCreated())
                     .andExpect(jsonPath("$.id").isNotEmpty())
                     .andExpect(jsonPath("$.numero", matchesPattern("OS-\\d{6}")))
@@ -142,7 +142,7 @@ class OrdemServicoIntegrationTest extends IntegrationTestBase {
         @DisplayName("deve retornar 400 quando queixaCliente está em branco")
         void deveRetornar400QuandoQueixaEmBranco() throws Exception {
             OrdemServicoCreateDTO dto = new OrdemServicoCreateDTO(
-                    clienteId, veiculoId, "", null, null);
+                    clienteId, veiculoId, "", null, null, null, null);
 
             mockMvc.perform(post(BASE)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -155,7 +155,7 @@ class OrdemServicoIntegrationTest extends IntegrationTestBase {
         @DisplayName("deve retornar 404 quando cliente não existe")
         void deveRetornar404QuandoClienteInexistente() throws Exception {
             OrdemServicoCreateDTO dto = new OrdemServicoCreateDTO(
-                    UUID.randomUUID(), veiculoId, "Queixa válida", null, null);
+                    UUID.randomUUID(), veiculoId, "Queixa válida", null, null, null, null);
 
             mockMvc.perform(post(BASE)
                             .contentType(MediaType.APPLICATION_JSON)
@@ -357,6 +357,74 @@ class OrdemServicoIntegrationTest extends IntegrationTestBase {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.content").isArray())
                     .andExpect(jsonPath("$.totalElements").isNumber());
+        }
+
+        @Test
+        @DisplayName("a fila ordena por status — Execução, Aprovação, Diagnóstico, Recebida")
+        void filaOrdenaPorPrioridadeDeStatus() throws Exception {
+            // Criadas nesta ordem, a mais antiga é a que fica em RECEBIDA — assim a ordenação
+            // observada só pode vir da prioridade de status, não da data de criação.
+            String recebida = numeroDe(criarOS());
+
+            String diagnostico = avancarAte(criarOS(), "EM_DIAGNOSTICO");
+            String aguardando = avancarAte(criarOS(), "EM_DIAGNOSTICO", "AGUARDANDO_APROVACAO");
+            String execucao = avancarAte(criarOS(), "EM_DIAGNOSTICO", "AGUARDANDO_APROVACAO",
+                    "EM_EXECUCAO");
+
+            mockMvc.perform(get(BASE))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].numero", is(execucao)))
+                    .andExpect(jsonPath("$.content[1].numero", is(aguardando)))
+                    .andExpect(jsonPath("$.content[2].numero", is(diagnostico)))
+                    .andExpect(jsonPath("$.content[3].numero", is(recebida)));
+        }
+
+        @Test
+        @DisplayName("dentro do mesmo status, a fila traz as mais antigas primeiro")
+        void filaTrazMaisAntigasPrimeiro() throws Exception {
+            String primeira = numeroDe(criarOS());
+            String segunda = numeroDe(criarOS());
+
+            mockMvc.perform(get(BASE))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content[0].numero", is(primeira)))
+                    .andExpect(jsonPath("$.content[1].numero", is(segunda)));
+        }
+
+        @Test
+        @DisplayName("a fila exclui as OS FINALIZADA e ENTREGUE")
+        void filaExcluiEncerradas() throws Exception {
+            String ativa = numeroDe(criarOS());
+            String entregue = avancarAte(criarOS(), "EM_DIAGNOSTICO", "AGUARDANDO_APROVACAO",
+                    "EM_EXECUCAO", "FINALIZADA", "ENTREGUE");
+
+            mockMvc.perform(get(BASE))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements", is(1)))
+                    .andExpect(jsonPath("$.content[0].numero", is(ativa)));
+
+            // A exclusão é lógica: a OS continua existindo e acessível por filtro explícito
+            mockMvc.perform(get(BASE).param("status", "ENTREGUE"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.totalElements", is(1)))
+                    .andExpect(jsonPath("$.content[0].numero", is(entregue)));
+
+            mockMvc.perform(get(BASE + "/" + entregue))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status", is("ENTREGUE")));
+        }
+
+        private String numeroDe(String respostaDaOS) throws Exception {
+            return objectMapper.readTree(respostaDaOS).get("numero").asText();
+        }
+
+        /** Cria a OS, percorre os status informados e devolve o número dela. */
+        private String avancarAte(String respostaDaOS, String... statuses) throws Exception {
+            String id = objectMapper.readTree(respostaDaOS).get("id").asText();
+            for (String status : statuses) {
+                avancarStatus(id, status);
+            }
+            return numeroDe(respostaDaOS);
         }
     }
 }

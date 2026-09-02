@@ -1,0 +1,36 @@
+# =============================================================================
+# Configuração NÃO sensível da aplicação.
+#
+# A divisão entre este ConfigMap e o Secret ao lado segue um critério simples:
+# se o valor puder aparecer num `kubectl describe` sem causar dano, é ConfigMap.
+# Host de banco, URLs do Keycloak e nome do realm são endereços — não credenciais.
+#
+# Os nomes das chaves são exatamente as variáveis de ambiente lidas por
+# application-prod.yml, e por isso entram no pod via `envFrom`.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: autopecas-config
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+
+  # O Service `postgres` é criado pelo Terraform, no mesmo namespace.
+  DB_URL: "jdbc:postgresql://postgres:5432/app_db"
+
+  # Dentro do cluster, JWKS e issuer apontam para o mesmo endereço porque o
+  # Keycloak está fixado em KC_HOSTNAME_URL=http://keycloak:8080. Sem isso o
+  # `iss` do token variaria conforme o host usado para pedi-lo, e a validação
+  # do resource server falharia para quem obtivesse o token via port-forward.
+  OAUTH2_JWK_URI: "http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs"
+  OAUTH2_ISSUER_URI: "http://keycloak:8080/realms/autopecas"
+
+  KEYCLOAK_AUTH_SERVER_URL: "http://keycloak:8080"
+  KEYCLOAK_REALM: "autopecas"
+  KEYCLOAK_CLIENT_ID: "autopecas-api"
+
+  TZ: "UTC"

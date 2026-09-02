@@ -1,0 +1,174 @@
+# =============================================================================
+# API de ordens de serviço.
+#
+# Dois pontos que sustentam o resto da orquestração:
+#
+#  • `resources.requests.cpu` é obrigatório para o HPA funcionar. O autoscaler
+#    calcula a utilização como uso/request; sem request declarado ele não tem
+#    denominador e a métrica fica indisponível.
+#
+#  • As probes usam os endpoints de liveness/readiness do Actuator, habilitados
+#    em application-prod.yml. A distinção importa: readiness tira o pod do
+#    balanceamento enquanto ele não consegue atender (ex.: banco fora);
+#    liveness o reinicia. Apontar liveness para um endpoint que depende do
+#    banco causaria reinícios em cascata numa indisponibilidade do Postgres.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autopecas-api
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  # Piso igual ao minReplicas do HPA. Depois do primeiro apply quem manda no
+  # número de réplicas é o HPA — por isso não se ajusta este valor à mão.
+  replicas: 2
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autopecas-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autopecas-api
+        app.kubernetes.io/part-of: autopecas
+    spec:
+      # Espalha as réplicas entre nós para que a queda de um nó não derrube
+      # todas — no kind com 2 workers, uma em cada.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: autopecas-api
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: autopecas-api:local
+          # A imagem é carregada no kind com `kind load docker-image`, não vem
+          # de registry. Com `Always` o kubelet tentaria puxar e falharia.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: autopecas-config
+            - secretRef:
+                name: autopecas-secrets
+          env:
+            # 70% do limite de 1Gi deixa margem para metaspace, threads e
+            # buffers off-heap, que não entram no heap contado pela flag.
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=70.0"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40      # até ~3min30 para subir (Flyway + JPA)
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              # 768Mi e não 512Mi: medido em cluster kind, o pod estabiliza em
+              # ~420Mi. Com request de 512Mi isso dava 82% de utilização em
+              # regime permanente — acima do alvo do HPA, que passaria a
+              # escalar por memória sem nunca convergir (ver 40-app-hpa.yaml).
+              # Com 768Mi o patamar normal fica em ~55%.
+              memory: 768Mi
+            limits:
+              # Sem limite de CPU de propósito: throttling de CPU numa JVM
+              # prejudica muito a latência, e o request já garante a fatia
+              # mínima. Memória tem limite porque estouro precisa virar OOMKill.
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem exige um volume gravável para o /tmp que a
+            # JVM e o Tomcat usam.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      # Tempo para o `server.shutdown: graceful` drenar as requisições em voo
+      terminationGracePeriodSeconds: 40
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autopecas-api
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: autopecas-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Acesso a partir da máquina host: porta 30080 do nó → 8080 do host no kind.
+apiVersion: v1
+kind: Service
+metadata:
+  name: autopecas-api-nodeport
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: autopecas-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30080
+---
+# Garante que uma drenagem de nó (`kubectl drain`, upgrade) nunca deixe a API
+# sem nenhuma réplica de pé.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: autopecas-api
+  namespace: autopecas
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autopecas-api

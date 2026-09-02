@@ -61,8 +61,27 @@ public class KeycloakJwtAuthConverter implements Converter<Jwt, AbstractAuthenti
                 extractRealmRoles(jwt).stream()
         ).collect(Collectors.toSet());
 
-        // "sub" do JWT é o identificador único do usuário no Keycloak
-        return new JwtAuthenticationToken(jwt, authorities, jwt.getSubject());
+        return new JwtAuthenticationToken(jwt, authorities, nomeDoPrincipal(jwt));
+    }
+
+    /**
+     * Nome do principal: o e-mail do token, com "preferred_username" e "sub" como alternativas.
+     * <p>
+     * A aplicação identifica funcionários e clientes por e-mail, e não pelo "sub" do Keycloak —
+     * usar o "sub" aqui faria toda busca por e-mail falhar silenciosamente. As alternativas
+     * cobrem realms que não expõem o claim "email" (escopo não concedido ou usuário sem e-mail),
+     * caso em que a busca simplesmente não encontra ninguém, em vez de quebrar a autenticação.
+     */
+    private String nomeDoPrincipal(Jwt jwt) {
+        String email = jwt.getClaimAsString("email");
+        if (email != null && !email.isBlank()) {
+            return email;
+        }
+        String username = jwt.getClaimAsString("preferred_username");
+        if (username != null && !username.isBlank()) {
+            return username;
+        }
+        return jwt.getSubject();
     }
 
     /**

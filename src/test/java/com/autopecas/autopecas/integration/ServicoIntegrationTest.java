@@ -1,6 +1,6 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.servico.ServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.servico.ServicoCreateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

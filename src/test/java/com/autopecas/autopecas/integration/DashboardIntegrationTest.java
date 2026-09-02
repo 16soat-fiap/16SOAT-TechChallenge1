@@ -1,10 +1,10 @@
 package com.autopecas.autopecas.integration;
 
-import com.autopecas.autopecas.dto.cliente.ClienteCreatePFDTO;
-import com.autopecas.autopecas.dto.os.AvancarStatusDTO;
-import com.autopecas.autopecas.dto.os.OrdemServicoCreateDTO;
-import com.autopecas.autopecas.dto.peca.PecaCreateDTO;
-import com.autopecas.autopecas.dto.veiculo.VeiculoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.cliente.ClienteCreatePFDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.AvancarStatusDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.os.OrdemServicoCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.peca.PecaCreateDTO;
+import com.autopecas.autopecas.adapter.in.web.dto.veiculo.VeiculoCreateDTO;
 import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -71,7 +71,7 @@ class DashboardIntegrationTest extends IntegrationTestBase {
 
     private UUID criarOS(UUID clienteId, UUID veiculoId) throws Exception {
         OrdemServicoCreateDTO dto = new OrdemServicoCreateDTO(
-                clienteId, veiculoId, "Verificação geral", null, null);
+                clienteId, veiculoId, "Verificação geral", null, null, null, null);
         String resp = mockMvc.perform(post("/api/ordens-servico")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(dto)))

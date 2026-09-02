@@ -1,3 +1,7 @@
+-- Dados de demonstração para o vídeo do Tech Challenge.
+-- Carregado apenas em dev/prod (classpath:db/demo). NÃO roda nos testes de integração,
+-- pois os CPFs aqui (ex.: 52998224725) colidem com os usados nos testes.
+
 -- ─── Clientes ────────────────────────────────────────────────────────────────
 
 INSERT INTO clientes (id, tipo_cliente, nome, email, telefone, aceita_notificacoes, ativo,
@@ -97,7 +101,6 @@ INSERT INTO ordens_servico (id, numero, version, status, quilometragem_entrada,
                             data_entrega, created_at, updated_at, cliente_id, veiculo_id,
                             atendente_recepcao_id, mecanico_responsavel_id)
 VALUES
-    -- OS-000001: EM_EXECUCAO (mais antiga da faixa)
     ('66666666-6666-4666-8666-666666666601', 'OS-000001', 0, 'EM_EXECUCAO', 45000,
      'Veículo recebido para demonstração', NULL, 'Barulho metálico ao frear',
      0.00, TIMESTAMP '2026-09-01 09:00:00', NULL, NULL,
@@ -105,7 +108,6 @@ VALUES
      '11111111-1111-4111-8111-111111111101', '22222222-2222-4222-8222-222222222201',
      '33333333-3333-4333-8333-333333333303', '33333333-3333-4333-8333-333333333301'),
 
-    -- OS-000002: EM_EXECUCAO
     ('66666666-6666-4666-8666-666666666602', 'OS-000002', 0, 'EM_EXECUCAO', 52000,
      'Veículo recebido para demonstração', NULL, 'Vibração no volante em alta velocidade',
      0.00, TIMESTAMP '2026-09-01 10:00:00', NULL, NULL,
@@ -113,7 +115,6 @@ VALUES
      '11111111-1111-4111-8111-111111111102', '22222222-2222-4222-8222-222222222202',
      '33333333-3333-4333-8333-333333333303', '33333333-3333-4333-8333-333333333302'),
 
-    -- OS-000003: AGUARDANDO_APROVACAO (orçamento enviado — aprovar no vídeo)
     ('66666666-6666-4666-8666-666666666603', 'OS-000003', 0, 'AGUARDANDO_APROVACAO', 78000,
      'Veículo recebido para demonstração',
      'Correia dentada ressecada e tensor com folga. Recomendada troca imediata.',
@@ -123,7 +124,6 @@ VALUES
      '11111111-1111-4111-8111-111111111103', '22222222-2222-4222-8222-222222222203',
      '33333333-3333-4333-8333-333333333303', NULL),
 
-    -- OS-000004: EM_DIAGNOSTICO
     ('66666666-6666-4666-8666-666666666604', 'OS-000004', 0, 'EM_DIAGNOSTICO', 61000,
      'Veículo recebido para demonstração',
      'Leitura OBD: sensor de oxigênio com leitura irregular.',
@@ -133,7 +133,6 @@ VALUES
      '11111111-1111-4111-8111-111111111101', '22222222-2222-4222-8222-222222222201',
      '33333333-3333-4333-8333-333333333303', NULL),
 
-    -- OS-000005: RECEBIDA (abrir nova OS ao vivo ou consultar esta)
     ('66666666-6666-4666-8666-666666666605', 'OS-000005', 0, 'RECEBIDA', 38000,
      'Veículo recebido para demonstração', NULL, 'Ar-condicionado não gela',
      0.00, NULL, NULL, NULL,
@@ -141,7 +140,6 @@ VALUES
      '11111111-1111-4111-8111-111111111102', '22222222-2222-4222-8222-222222222202',
      '33333333-3333-4333-8333-333333333303', NULL),
 
-    -- OS-000006: FINALIZADA (oculta na listagem padrão)
     ('66666666-6666-4666-8666-666666666606', 'OS-000006', 0, 'FINALIZADA', 40000,
      'Veículo recebido para demonstração', NULL, 'Troca de óleo programada',
      269.90, TIMESTAMP '2026-08-30 09:00:00', TIMESTAMP '2026-08-30 11:00:00', NULL,
@@ -149,7 +147,6 @@ VALUES
      '11111111-1111-4111-8111-111111111101', '22222222-2222-4222-8222-222222222201',
      '33333333-3333-4333-8333-333333333303', '33333333-3333-4333-8333-333333333301'),
 
-    -- OS-000007: ENTREGUE (oculta na listagem padrão)
     ('66666666-6666-4666-8666-666666666607', 'OS-000007', 0, 'ENTREGUE', 40500,
      'Veículo recebido para demonstração', NULL, 'Revisão dos 40.000 km',
      400.00, TIMESTAMP '2026-08-28 09:00:00', TIMESTAMP '2026-08-28 14:00:00',
@@ -181,8 +178,6 @@ VALUES
 INSERT INTO itens_orcamento_peca (orcamento_id, peca_id, quantidade, preco_unitario)
 VALUES
     ('77777777-7777-4777-8777-777777777701', '55555555-5555-4555-8555-555555555504', 1, 320.00);
-
--- ─── Sequences (próximo número gerado pela API) ─────────────────────────────
 
 SELECT setval('os_numero_seq', 7, true);
 SELECT setval('mecanico_seq', 2, true);

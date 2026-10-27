@@ -23,20 +23,12 @@ output "database_jdbc_url" {
   value       = "jdbc:postgresql://postgres:5432/${var.app_database}"
 }
 
-output "keycloak_jdbc_url" {
-  description = "URL JDBC do banco do Keycloak, como vista de dentro do cluster."
-  value       = "jdbc:postgresql://postgres:5432/${var.keycloak_database}"
-}
 
 output "app_url" {
   description = "URL da API a partir da máquina host (após aplicar infra/k8s)."
   value       = "http://localhost:${var.app_host_port}"
 }
 
-output "keycloak_url" {
-  description = "URL do Keycloak a partir da máquina host (após aplicar infra/k8s)."
-  value       = "http://localhost:${var.keycloak_host_port}"
-}
 
 output "proximos_passos" {
   description = "O que fazer depois que o Terraform terminar."
@@ -58,6 +50,5 @@ output "proximos_passos" {
          kubectl get hpa  -n ${var.namespace} -w
 
       API:      http://localhost:${var.app_host_port}/swagger-ui.html
-      Keycloak: http://localhost:${var.keycloak_host_port}  (admin/admin)
   EOT
 }

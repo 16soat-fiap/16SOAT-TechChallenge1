@@ -1,7 +1,7 @@
 # =============================================================================
 # Stack de desenvolvimento local.
 #
-#   docker compose up -d --build      → postgres + keycloak + app
+#   docker compose up -d --build      → postgres + app
 #   docker compose --profile qa up -d → sobe também SonarQube (pesado, ~2 GB)
 #
 # O SonarQube ficou atrás de um profile porque só é necessário ao rodar a
@@ -21,53 +21,12 @@ services:
       TZ: UTC
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Cria o banco do Keycloak separado do banco da aplicação
-      - ./docker/postgres/init-keycloak-db.sh:/docker-entrypoint-initdb.d/init-keycloak-db.sh:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d app_db"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:24.0.0
-    container_name: keycloak
-    command: start-dev --import-realm
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_DB: postgres
-      # Banco próprio: o Keycloak cria dezenas de tabelas e o Flyway da
-      # aplicação valida o schema dele — misturar os dois é pedir conflito.
-      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak_db
-      KC_DB_USERNAME: postgres
-      KC_DB_PASSWORD: postgres
-      KC_HEALTH_ENABLED: "true"
-      KC_HTTP_ENABLED: "true"
-      KC_HOSTNAME_STRICT: "false"
-    ports:
-      - "9080:8080"
-    volumes:
-      - ./keycloak:/opt/keycloak/data/import:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      # /health/ready fica na porta 8080, a mesma do HTTP: a interface de
-      # management na 9000 só existe a partir do Keycloak 25.
-      # O `exec 3<>` é um cliente HTTP em bash puro — a imagem do Keycloak não
-      # traz curl nem wget.
-      test:
-        - CMD-SHELL
-        - "exec 3<>/dev/tcp/127.0.0.1/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '\"UP\"' <&3"
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      # O boot do Keycloak passa de 2 minutos (augmentation do Quarkus + import
-      # do realm); antes disso as tentativas não contam como falha.
-      start_period: 90s
 
   app:
     build:
@@ -82,16 +41,12 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/app_db
       DB_USERNAME: postgres
       DB_PASSWORD: postgres
-      # JWKS pela rede interna do Compose; issuer como o cliente o enxerga.
-      OAUTH2_JWK_URI: http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs
-      OAUTH2_ISSUER_URI: http://localhost:9080/realms/autopecas
-      KEYCLOAK_AUTH_SERVER_URL: http://localhost:9080
-      KEYCLOAK_REALM: autopecas
+      JWT_ISSUER: ${JWT_ISSUER:?Configure JWT_ISSUER com a URL do emissor Lambda}
+      JWT_JWKS_URI: ${JWT_JWKS_URI:-${JWT_ISSUER}/.well-known/jwks.json}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-autopecas-api}
       TZ: UTC
     depends_on:
       postgres:
-        condition: service_healthy
-      keycloak:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:

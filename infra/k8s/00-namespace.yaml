@@ -4,7 +4,6 @@ metadata:
   name: autopecas
   labels:
     app.kubernetes.io/part-of: autopecas
-    # Baseline em vez de restricted: a imagem do Keycloak roda com um usuário
     # próprio e não satisfaz todas as exigências do perfil restricted.
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted

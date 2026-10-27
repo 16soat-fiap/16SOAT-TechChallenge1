@@ -9,7 +9,9 @@ import com.autopecas.autopecas.adapter.in.web.mapper.OrdemServicoWebMapper;
 import com.autopecas.autopecas.adapter.in.web.mapper.PaginacaoWebMapper;
 import com.autopecas.autopecas.application.port.in.GestaoDeOrdensServico;
 import com.autopecas.autopecas.domain.enums.StatusOS;
+
 import jakarta.validation.Valid;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -31,8 +33,8 @@ import java.util.UUID;
 /**
  * Adapter de entrada HTTP do agregado OrdemServico.
  *
- * <p>O e-mail do usuário autenticado é extraído aqui e entra no command — a aplicação não
- * conhece Authentication nem qualquer tipo do Spring Security.
+ * <p>O UUID do usuário autenticado é extraído aqui e entra no command — a aplicação não conhece
+ * Authentication nem qualquer tipo do Spring Security.
  */
 @RestController
 @RequestMapping("/api/ordens-servico")
@@ -42,9 +44,10 @@ public class OrdemServicoController {
     private final OrdemServicoWebMapper mapper;
     private final PaginacaoWebMapper paginacaoMapper;
 
-    public OrdemServicoController(GestaoDeOrdensServico gestaoDeOrdensServico,
-                                  OrdemServicoWebMapper mapper,
-                                  PaginacaoWebMapper paginacaoMapper) {
+    public OrdemServicoController(
+            GestaoDeOrdensServico gestaoDeOrdensServico,
+            OrdemServicoWebMapper mapper,
+            PaginacaoWebMapper paginacaoMapper) {
         this.gestaoDeOrdensServico = gestaoDeOrdensServico;
         this.mapper = mapper;
         this.paginacaoMapper = paginacaoMapper;
@@ -52,21 +55,24 @@ public class OrdemServicoController {
 
     // O CLIENTE só enxerga a listagem filtrada pelo próprio clienteId
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
-            + "or @propriedade.ehOProprioCliente(authentication, #clienteId)")
+    @PreAuthorize(
+            "hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
+                    + "or @propriedade.ehOProprioCliente(authentication, #clienteId)")
     public ResponseEntity<Page<OrdemServicoResponseDTO>> listar(
             @RequestParam(required = false) StatusOS status,
             @RequestParam(required = false) UUID clienteId,
             @RequestParam(required = false) UUID mecanicoId,
             @PageableDefault(size = 20) Pageable pageable) {
-        var pagina = gestaoDeOrdensServico.listar(status, clienteId, mecanicoId,
-                paginacaoMapper.paraRequisicao(pageable));
+        var pagina =
+                gestaoDeOrdensServico.listar(
+                        status, clienteId, mecanicoId, paginacaoMapper.paraRequisicao(pageable));
         return ResponseEntity.ok(paginacaoMapper.paraPage(pagina, pageable, mapper::paraResposta));
     }
 
     @GetMapping("/{numero}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
-            + "or @propriedade.ehDonoDaOrdemServicoPorNumero(authentication, #numero)")
+    @PreAuthorize(
+            "hasAnyRole('ADMIN', 'ATENDENTE', 'MECANICO') "
+                    + "or @propriedade.ehDonoDaOrdemServicoPorNumero(authentication, #numero)")
     public ResponseEntity<OrdemServicoResponseDTO> buscarPorNumero(@PathVariable String numero) {
         return ResponseEntity.ok(mapper.paraResposta(gestaoDeOrdensServico.porNumero(numero)));
     }
@@ -75,12 +81,17 @@ public class OrdemServicoController {
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<OrdemServicoResponseDTO> criar(
-            @Valid @RequestBody OrdemServicoCreateDTO dto,
-            Authentication authentication) {
-        var comando = new GestaoDeOrdensServico.Abrir(dto.clienteId(), dto.veiculoId(),
-                dto.queixaCliente(), dto.observacoesEntrada(), dto.quilometragemEntrada(),
-                emailDe(authentication), mapper.paraItensServico(dto.itensServico()),
-                mapper.paraItensPeca(dto.itensPeca()));
+            @Valid @RequestBody OrdemServicoCreateDTO dto, Authentication authentication) {
+        var comando =
+                new GestaoDeOrdensServico.Abrir(
+                        dto.clienteId(),
+                        dto.veiculoId(),
+                        dto.queixaCliente(),
+                        dto.observacoesEntrada(),
+                        dto.quilometragemEntrada(),
+                        subjectDe(authentication),
+                        mapper.paraItensServico(dto.itensServico()),
+                        mapper.paraItensPeca(dto.itensPeca()));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(mapper.paraResposta(gestaoDeOrdensServico.abrir(comando)));
     }
@@ -91,31 +102,32 @@ public class OrdemServicoController {
             @PathVariable UUID id,
             @Valid @RequestBody AvancarStatusDTO dto,
             Authentication authentication) {
-        var comando = new GestaoDeOrdensServico.AvancarStatus(dto.novoStatus(), dto.observacao(),
-                emailDe(authentication));
-        return ResponseEntity.ok(mapper.paraResposta(gestaoDeOrdensServico.avancarStatus(id, comando)));
+        var comando =
+                new GestaoDeOrdensServico.AvancarStatus(
+                        dto.novoStatus(), dto.observacao(), subjectDe(authentication));
+        return ResponseEntity.ok(
+                mapper.paraResposta(gestaoDeOrdensServico.avancarStatus(id, comando)));
     }
 
     // O diagnóstico é técnico: quem registra é o mecânico
     @PatchMapping("/{id}/diagnostico")
     @PreAuthorize("hasAnyRole('ADMIN', 'MECANICO')")
     public ResponseEntity<OrdemServicoResponseDTO> registrarDiagnostico(
-            @PathVariable UUID id,
-            @Valid @RequestBody DiagnosticoDTO dto) {
-        return ResponseEntity.ok(mapper.paraResposta(
-                gestaoDeOrdensServico.registrarDiagnostico(id, dto.diagnostico())));
+            @PathVariable UUID id, @Valid @RequestBody DiagnosticoDTO dto) {
+        return ResponseEntity.ok(
+                mapper.paraResposta(
+                        gestaoDeOrdensServico.registrarDiagnostico(id, dto.diagnostico())));
     }
 
     @PatchMapping("/{id}/mecanico")
     @PreAuthorize("hasAnyRole('ADMIN', 'ATENDENTE')")
     public ResponseEntity<OrdemServicoResponseDTO> atribuirMecanico(
-            @PathVariable UUID id,
-            @Valid @RequestBody AtribuirMecanicoDTO dto) {
-        return ResponseEntity.ok(mapper.paraResposta(
-                gestaoDeOrdensServico.atribuirMecanico(id, dto.mecanicoId())));
+            @PathVariable UUID id, @Valid @RequestBody AtribuirMecanicoDTO dto) {
+        return ResponseEntity.ok(
+                mapper.paraResposta(gestaoDeOrdensServico.atribuirMecanico(id, dto.mecanicoId())));
     }
 
-    private String emailDe(Authentication authentication) {
+    private String subjectDe(Authentication authentication) {
         return authentication != null ? authentication.getName() : null;
     }
 }

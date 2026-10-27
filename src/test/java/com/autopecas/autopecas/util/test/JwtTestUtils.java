@@ -6,6 +6,7 @@ import com.nimbusds.jose.JWSSigner;
 import com.nimbusds.jose.crypto.RSASSASigner;
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.SignedJWT;
+
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
@@ -17,17 +18,17 @@ import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
  * Utilitários para geração de tokens JWT em testes de integração.
  *
- * Gera par de chaves RSA em memória (sem Keycloak real) e assina tokens
- * com a estrutura de claims que o KeycloakJwtAuthConverter espera.
+ * <p>Gera par de chaves RSA em memória (sem emissor Lambda real) e assina tokens com a estrutura de
+ * claims que o LambdaJwtAuthConverter espera.
  *
- * Uso nos testes:
+ * <p>Uso nos testes:
+ *
  * <pre>
  *   mockMvc.perform(get("/api/clientes")
  *       .header("Authorization", "Bearer " + JwtTestUtils.tokenAdmin()))
@@ -42,22 +43,24 @@ public final class JwtTestUtils {
     public static final RSAPublicKey PUBLIC_KEY = (RSAPublicKey) KEY_PAIR.getPublic();
     public static final RSAPrivateKey PRIVATE_KEY = (RSAPrivateKey) KEY_PAIR.getPrivate();
 
-    private static final String ISSUER = "http://localhost:9999/realms/autopecas";
+    private static final String ISSUER = "https://auth.example.test";
 
     private JwtTestUtils() {}
 
     // ─── Tokens prontos por role ───────────────────────────────────────────
 
     public static String tokenAdmin() {
-        return assinarToken("admin-test", "admin.user", List.of("ADMIN"));
+        return assinarToken("00000000-0000-0000-0000-000000000001", "admin.user", List.of("ADMIN"));
     }
 
     public static String tokenAtendente() {
-        return assinarToken("atendente-test", "ana.atendente", List.of("ATENDENTE"));
+        return assinarToken(
+                "00000000-0000-0000-0000-000000000002", "ana.atendente", List.of("ATENDENTE"));
     }
 
     public static String tokenMecanico() {
-        return assinarToken("mecanico-test", "joao.mecanico", List.of("MECANICO"));
+        return assinarToken(
+                "00000000-0000-0000-0000-000000000003", "joao.mecanico", List.of("MECANICO"));
     }
 
     public static String tokenComRoles(List<String> roles) {
@@ -67,48 +70,51 @@ public final class JwtTestUtils {
     // ─── JwtAuthenticationToken para usar com SecurityMockMvcRequestPostProcessors ──
 
     public static JwtAuthenticationToken authenticationAdmin() {
-        return buildAuthentication("admin-test", "admin.user", List.of("ADMIN"));
+        return buildAuthentication(
+                "00000000-0000-0000-0000-000000000001", "admin.user", List.of("ADMIN"));
     }
 
     public static JwtAuthenticationToken authenticationAtendente() {
-        return buildAuthentication("atendente-test", "ana.atendente", List.of("ATENDENTE"));
+        return buildAuthentication(
+                "00000000-0000-0000-0000-000000000002", "ana.atendente", List.of("ATENDENTE"));
     }
 
     public static JwtAuthenticationToken authenticationMecanico() {
-        return buildAuthentication("mecanico-test", "joao.mecanico", List.of("MECANICO"));
+        return buildAuthentication(
+                "00000000-0000-0000-0000-000000000003", "joao.mecanico", List.of("MECANICO"));
     }
 
     // ─── Implementação interna ─────────────────────────────────────────────
 
     /**
-     * Assina um token JWT com RS256 no formato esperado pelo Keycloak.
-     * Os roles ficam em realm_access.roles.
+     * Assina um token JWT com RS256 no formato esperado pelo emissor Lambda. Os roles ficam em
+     * realm_access.roles.
      */
     public static String assinarToken(String subject, String username, List<String> roles) {
         try {
             JWSSigner signer = new RSASSASigner(PRIVATE_KEY);
 
             Instant now = Instant.now();
-            JWTClaimsSet claims = new JWTClaimsSet.Builder()
-                    .issuer(ISSUER)
-                    .subject(subject)
-                    .audience("autopecas-api")
-                    .issueTime(Date.from(now))
-                    .expirationTime(Date.from(now.plusSeconds(3600)))
-                    .jwtID(UUID.randomUUID().toString())
-                    .claim("preferred_username", username)
-                    .claim("email", username + "@test.com")
-                    // Estrutura de roles do Keycloak
-                    .claim("realm_access", Map.of("roles", roles))
-                    .claim("resource_access", Map.of(
-                            "autopecas-api", Map.of("roles", roles)
-                    ))
-                    .build();
+            JWTClaimsSet claims =
+                    new JWTClaimsSet.Builder()
+                            .issuer(ISSUER)
+                            .subject(subject)
+                            .audience("autopecas-api")
+                            .issueTime(Date.from(now))
+                            .expirationTime(Date.from(now.plusSeconds(3600)))
+                            .jwtID(UUID.randomUUID().toString())
+                            .claim("scope", "api:access")
+                            .claim(
+                                    "perfil",
+                                    roles.equals(List.of("CLIENTE")) ? "CLIENTE" : "FUNCIONARIO")
+                            .claim("roles", roles)
+                            .claim("tipo", roles.equals(List.of("CLIENTE")) ? "PF" : null)
+                            .build();
 
-            SignedJWT signedJWT = new SignedJWT(
-                    new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(),
-                    claims
-            );
+            SignedJWT signedJWT =
+                    new SignedJWT(
+                            new JWSHeader.Builder(JWSAlgorithm.RS256).keyID("test-key").build(),
+                            claims);
             signedJWT.sign(signer);
             return signedJWT.serialize();
 
@@ -117,21 +123,26 @@ public final class JwtTestUtils {
         }
     }
 
-    private static JwtAuthenticationToken buildAuthentication(String sub, String username, List<String> roles) {
+    private static JwtAuthenticationToken buildAuthentication(
+            String sub, String username, List<String> roles) {
         Instant now = Instant.now();
-        Jwt jwt = Jwt.withTokenValue("mock-token-" + sub)
-                .header("alg", "RS256")
-                .issuer(ISSUER)
-                .subject(sub)
-                .issuedAt(now)
-                .expiresAt(now.plusSeconds(3600))
-                .claim("preferred_username", username)
-                .claim("realm_access", Map.of("roles", roles))
-                .build();
+        Jwt jwt =
+                Jwt.withTokenValue("mock-token-" + sub)
+                        .header("alg", "RS256")
+                        .issuer(ISSUER)
+                        .subject(sub)
+                        .issuedAt(now)
+                        .expiresAt(now.plusSeconds(3600))
+                        .audience(List.of("autopecas-api"))
+                        .claim("scope", "api:access")
+                        .claim("perfil", "FUNCIONARIO")
+                        .claim("roles", roles)
+                        .build();
 
-        List<SimpleGrantedAuthority> authorities = roles.stream()
-                .map(r -> new SimpleGrantedAuthority("ROLE_" + r.toUpperCase()))
-                .collect(Collectors.toList());
+        List<SimpleGrantedAuthority> authorities =
+                roles.stream()
+                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r.toUpperCase()))
+                        .collect(Collectors.toList());
 
         return new JwtAuthenticationToken(jwt, authorities, sub);
     }

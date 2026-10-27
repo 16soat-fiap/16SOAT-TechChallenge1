@@ -9,11 +9,9 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          # A URL interna (Backend falando com Keycloak via rede do Docker Compose).
-          # OAUTH2_JWK_URI é a variável passada pelo docker-compose ao serviço `app`.
-          jwk-set-uri: ${OAUTH2_JWK_URI:http://keycloak:8080/realms/autopecas/protocol/openid-connect/certs}
-          # A URL externa (Validação da origem do Token emitido pro cliente)
-          issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:9080/realms/autopecas}
+          jwk-set-uri: ${JWT_JWKS_URI:${JWT_ISSUER}/.well-known/jwks.json}
+          issuer-uri: ${JWT_ISSUER}
+
 
   jackson:
     time-zone: UTC
@@ -31,3 +29,5 @@ spring:
 notificacoes:
   email:
     remetente: ${MAIL_REMETENTE:nao-responda@autopecas.local}
+auth:
+  audience: ${JWT_AUDIENCE:autopecas-api}

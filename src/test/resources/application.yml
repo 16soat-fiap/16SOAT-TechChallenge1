@@ -33,21 +33,15 @@ spring:
   jackson:
     time-zone: UTC
 
-  # O JwtDecoder real é substituído por SecurityTestConfig, que valida tokens
-  # assinados em memória pelo JwtTestUtils. Estes valores existem apenas para
-  # satisfazer a injeção de propriedades da SecurityConfig — nenhuma chamada HTTP
-  # ao Keycloak é feita nos testes.
   security:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: http://localhost:9999/realms/autopecas/protocol/openid-connect/certs
-          issuer-uri: http://localhost:9999/realms/autopecas
+          jwk-set-uri: https://auth.example.test/.well-known/jwks.json
+          issuer-uri: https://auth.example.test
 
-keycloak:
-  client-id: autopecas-api
-  realm: autopecas
-  auth-server-url: http://localhost:9999
+auth:
+  audience: autopecas-api
 
 logging:
   level:

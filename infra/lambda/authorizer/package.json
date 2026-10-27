@@ -1,0 +1,25 @@
+{
+  "name": "autopecas-authorizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lambda Authorizer do API Gateway: valida o JWT emitido pelo Keycloak",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test jwt.test.mjs"
+  },
+  "//": [
+    "Sem bloco `dependencies`, e isso é um requisito, não uma coincidência: o",
+    "pacote de deploy é zipado direto deste diretório pelo archive_file do",
+    "Terraform, sem passo de `npm install`. Um import de pacote externo falharia",
+    "em produção com MODULE_NOT_FOUND, e só na primeira invocação.",
+    "",
+    "O CI verifica isso explicitamente — ver o job `lambda` em",
+    ".github/workflows/ci-infra-aws.yml.",
+    "",
+    "Este arquivo existe apenas para `npm test` local e fica FORA do zip",
+    "(excludes em 04-gateway-auth/authorizer.tf)."
+  ]
+}

@@ -1,0 +1,232 @@
+# =============================================================================
+# Keycloak no EKS — continua o emissor dos tokens.
+#
+# Diferenças em relação ao infra/k8s/20-keycloak.yaml (ambiente kind):
+#
+#  • O banco é o RDS, em SCHEMA separado (`keycloak`) dentro do MESMO banco da
+#    aplicação, em vez de um segundo banco. Criar um segundo banco exigiria
+#    rodar `CREATE DATABASE` de dentro da VPC, e o Terraform roda de fora.
+#
+#  • Um initContainer cria o schema. O Keycloak respeita `KC_DB_SCHEMA` mas não
+#    cria o schema — sem este passo, ele sobe e falha na primeira migração.
+#
+#  • A configuração vem de um ConfigMap e de um Secret gerados pelo Terraform
+#    (stack 04), porque dependem da URL do API Gateway e da senha que o RDS
+#    gerou. Nada sensível neste arquivo.
+#
+#  • `KC_HOSTNAME_URL` aponta para o API Gateway, não para `http://keycloak:8080`:
+#    é por ali que o cliente pede o token, e é esse endereço que precisa
+#    aparecer no claim `iss`.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  # Réplica única, como no ambiente local: o modo `start-dev` não forma cluster
+  # e o import do realm não é coordenado entre instâncias. Escalar exigiria
+  # `kc.sh build` + `start --optimized` e cache Infinispan configurado.
+  #
+  # Consequência honesta: o Keycloak é ponto único de falha para a EMISSÃO de
+  # token. A aplicação não cai com ele — ela valida assinatura com a chave
+  # pública em cache —, mas ninguém consegue obter token novo enquanto estiver
+  # fora.
+  replicas: 1
+  strategy:
+    # Recreate, e não RollingUpdate: duas instâncias apontando para o mesmo
+    # schema durante a transição podem rodar migração concorrente.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/part-of: autopecas
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ─────────────────────────────────────────────────────────────────────
+      # Cria o schema do Keycloak antes de ele subir.
+      #
+      # Idempotente (`IF NOT EXISTS`), então reiniciar o pod não causa dano.
+      # Espera o RDS aceitar conexão antes de tentar: num cluster recém-criado,
+      # o pod pode subir enquanto a instância ainda está inicializando.
+      # ─────────────────────────────────────────────────────────────────────
+      initContainers:
+        - name: criar-schema
+          image: postgres:16-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "Aguardando o RDS aceitar conexoes..."
+              until pg_isready --quiet --timeout=3; do sleep 2; done
+              echo "Criando o schema ${KC_SCHEMA} se necessario..."
+              psql -v ON_ERROR_STOP=1 -c \
+                "CREATE SCHEMA IF NOT EXISTS \"${KC_SCHEMA}\" AUTHORIZATION \"${PGUSER}\""
+              echo "Schema ${KC_SCHEMA} pronto."
+          env:
+            # psql lê o endereço destas variáveis — não entende URL JDBC, por
+            # isso o ConfigMap traz host, porta e banco separados.
+            - name: PGHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-config
+                  key: DB_HOST
+            - name: PGPORT
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-config
+                  key: DB_PORT
+            - name: PGDATABASE
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-config
+                  key: DB_NAME
+            - name: KC_SCHEMA
+              valueFrom:
+                configMapKeyRef:
+                  name: keycloak-config
+                  key: KC_DB_SCHEMA
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KC_DB_USERNAME
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-secrets
+                  key: KC_DB_PASSWORD
+            # O parameter group do RDS aplica `rds.force_ssl = 1`: sem isto, o
+            # servidor recusa a conexão.
+            - name: PGSSLMODE
+              value: require
+          # A imagem do Postgres não define USER, então o pod-level
+          # runAsNonRoot a reprovaria sem um UID explícito. 70 é o usuário
+          # `postgres` na variante alpine.
+          securityContext:
+            runAsUser: 70
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:24.0.0
+          args: ["start-dev", "--import-realm"]
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            # Endereço do banco, schema e a URL pública — gerados pelo Terraform
+            # porque dependem do RDS e do API Gateway.
+            - configMapRef:
+                name: keycloak-config
+            - secretRef:
+                name: keycloak-secrets
+          env:
+            # O Quarkus não lê o limite de memória do cgroup, então o heap
+            # precisa ser declarado. 896m dentro de um limite de 1500Mi deixa
+            # margem para metaspace e buffers off-heap.
+            - name: JAVA_OPTS_APPEND
+              value: "-Xms256m -Xmx896m"
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          # No Keycloak 24 o /health/* vive no próprio listener HTTP; a interface
+          # de management na porta 9000 só aparece na 25.
+          #
+          # O boot passa de 2 minutos (augmentation do Quarkus + import do
+          # realm). A startupProbe absorve isso sem afrouxar a liveness.
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1500Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: realm-import
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Porta pela qual o NLB interno entrega o tráfego da rota /realms/* do API
+# Gateway. O número precisa casar com `keycloak_node_port` da stack 01 —
+# divergir deixa o target group permanentemente unhealthy.
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-nodeport
+  namespace: autopecas
+  labels:
+    app.kubernetes.io/name: keycloak
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 30081

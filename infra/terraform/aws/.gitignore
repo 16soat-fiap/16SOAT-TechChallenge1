@@ -1,0 +1,26 @@
+# O state contém, em texto claro, tudo que foi provisionado — inclusive a senha
+# do RDS lida do Secrets Manager e o conteúdo dos Secrets do Kubernetes. O state
+# "de verdade" fica no S3 cifrado; o que aparece aqui são cópias locais e o
+# state da stack _backend, que é local por necessidade.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+crash.log
+
+# Plano salvo com `plan -out`: carrega os valores das variáveis e do state.
+*.tfplan
+
+# Nome do bucket é específico da conta — ver backend.hcl.example
+backend.hcl
+
+# Valores locais — ver terraform.tfvars.example
+terraform.tfvars
+*.auto.tfvars
+
+# Pacote de deploy da Lambda, gerado pelo archive_file a cada plan
+.build/
+
+override.tf
+override.tf.json
+*_override.tf

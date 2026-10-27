@@ -1,0 +1,3 @@
+# Manifestos renderizados pelo infra/scripts/deploy.sh, com a URL do ECR (que
+# carrega o ID da conta AWS) já substituída. Caminho relativo a ESTA pasta.
+.rendered/

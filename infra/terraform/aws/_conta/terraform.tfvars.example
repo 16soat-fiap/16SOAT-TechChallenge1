@@ -1,0 +1,3 @@
+# Copie para terraform.tfvars (não versionado) e preencha.
+budget_email     = "voce@exemplo.com"
+budget_limit_usd = 20

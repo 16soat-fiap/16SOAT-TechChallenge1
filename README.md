@@ -6,6 +6,32 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 
 ---
 
+> ## 🎓 Avaliando este projeto?
+>
+> Tudo está neste README, na seção **[Infraestrutura na AWS (Fase 3)](#️-infraestrutura-na-aws-fase-3)**:
+>
+> - [Requisitos atendidos](#requisitos-atendidos) — o que foi entregue e onde ler cada parte
+> - [Execução de referência](#execução-de-referência) — o ciclo completo já rodado na AWS, com tempos e resultado
+> - [Como avaliar sem conta AWS](#como-avaliar-sem-conta-aws) — leitura guiada e validação estática, só Docker
+> - [Como subir na sua conta AWS](#como-subir-na-sua-conta-aws) — pré-requisitos, cota de vCPU e passo a passo
+> - [Custo](#custo) — **leia antes de subir**
+>
+> Para **ler e validar** o código não é preciso instalar nem provisionar nada.
+> Para **subir o ambiente**, basta **Docker, bash e curl** — Terraform, AWS CLI e
+> kubectl vêm de um container quando não estão instalados.
+>
+> ```bash
+> ./infra/scripts/up.sh      # provisiona (~50 min)
+> ./infra/scripts/deploy.sh  # publica a aplicação
+> ./infra/scripts/smoke.sh   # verifica ponta a ponta
+> ./infra/scripts/down.sh --tudo   # DERRUBA — o ambiente custa ~US$ 183/mês ligado
+> ```
+>
+> **No Windows, use Git Bash ou WSL** — os scripts são bash e não rodam em
+> PowerShell nem cmd.
+
+---
+
 ## 📑 Índice
 
 - [Stack Tecnológica](#-stack-tecnológica)
@@ -23,9 +49,19 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Autoscaling](#autoscaling-como-verificar)
   - [Segredos em produção](#segredos-em-produção)
   - [Operação e diagnóstico](#operação-e-diagnóstico)
+- [Infraestrutura na AWS (Fase 3)](#️-infraestrutura-na-aws-fase-3)
+  - [Requisitos atendidos](#requisitos-atendidos)
+  - [Execução de referência](#execução-de-referência)
+  - [Desenho](#desenho)
+  - [Como avaliar sem conta AWS](#como-avaliar-sem-conta-aws)
+  - [Como subir na sua conta AWS](#como-subir-na-sua-conta-aws)
+  - [O que o `smoke.sh` verifica](#o-que-o-smokesh-verifica)
+  - [Custo](#custo)
+  - [CI/CD](#cicd)
+  - [Limitações conhecidas](#limitações-conhecidas)
 - [Testes e Cobertura](#-testes-e-cobertura)
 - [Análise de Qualidade (SonarQube)](#-análise-de-qualidade-sonarqube)
-- [Variáveis de Ambiente](#-variáveis-de-ambiente)
+- [Variáveis de Ambiente](#️-variáveis-de-ambiente)
 - [Diagramas](#-diagramas)
 
 ---
@@ -48,7 +84,9 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 | Análise de Qualidade         | SonarQube (Community Edition)                           |
 | Containerização              | Docker (build em 3 estágios) + Docker Compose           |
 | Orquestração                 | Kubernetes — Deployments, Services, ConfigMap/Secrets, HPA |
-| Infraestrutura como Código   | Terraform (kind + PostgreSQL + metrics-server)          |
+| Infraestrutura como Código   | Terraform — local (kind) e AWS (5 stacks)               |
+| Nuvem (Fase 3)               | EKS + API Gateway HTTP API + Lambda + RDS PostgreSQL    |
+| Autenticação na borda        | Lambda Authorizer em Node.js 22, sem dependências       |
 
 ---
 
@@ -1064,6 +1102,462 @@ docker compose up postgres keycloak -d
 
 O profile `dev` difere do `prod` em dois pontos: `ddl-auto: none` (não valida o schema contra
 as entidades) e log SQL ligado.
+
+---
+
+## ☁️ Infraestrutura na AWS (Fase 3)
+
+Tudo o que foi descrito até aqui roda localmente, em cluster `kind`. A Fase 3 leva o mesmo
+sistema para a AWS, com cinco requisitos de infraestrutura: API Gateway, function serverless
+para autenticação, banco gerenciado, cluster Kubernetes com escalabilidade e Terraform.
+
+O ambiente local **continua funcionando e não foi alterado** — `kind` para desenvolver sem
+gastar, AWS para a entrega.
+
+### Requisitos atendidos
+
+| Requisito | Implementação | Onde ler |
+|---|---|---|
+| API Gateway para controle e roteamento | HTTP API com 3 integrações privadas, throttling por stage, log de acesso estruturado e reescrita de caminho | [`04-gateway-auth/apigateway.tf`](infra/terraform/aws/04-gateway-auth/apigateway.tf) |
+| Function serverless para autenticação | Lambda Authorizer (Node.js 22, sem dependências) que valida o JWT na borda | [`infra/lambda/authorizer/`](infra/lambda/authorizer/) |
+| Banco de dados gerenciado | RDS PostgreSQL 16, subnet privada, TLS obrigatório, senha gerenciada e rotacionada pelo RDS | [`02-database/main.tf`](infra/terraform/aws/02-database/main.tf) |
+| Cluster Kubernetes com escalabilidade | EKS com HPA (2→10 pods) **e** Cluster Autoscaler (2→4 nós) | [`03-cluster/`](infra/terraform/aws/03-cluster/) |
+| Terraform para provisionamento | 5 stacks com state remoto em S3 e lock nativo | [`infra/terraform/aws/`](infra/terraform/aws/) |
+
+### Execução de referência
+
+Rodado do zero em **2026-10-26**, numa conta pessoal em `us-east-1`, a partir do Windows
+(Git Bash, apenas Docker instalado), com o usuário restrito da stack [`_conta`](#opcional-a-stack-_conta)
+autenticado por `aws login`:
+
+| Etapa | Tempo | Resultado |
+|---|---|---|
+| `up.sh` | 51 min | 6/6 etapas, 94 recursos (rede 31, banco 3, cluster 32, gateway 28) |
+| `deploy.sh` | ~10 min | 347 testes passando, imagem no ECR, 2 réplicas da API + Keycloak `Running` |
+| `smoke.sh` | 2 min | `200` · `401` · `200` com token · `403` com token adulterado |
+| `down.sh --tudo` | 24 min | tudo destruído; só o bucket de state e o ECR permanecem |
+
+Estado do cluster logo após o deploy: 2 nós `t3.medium` `Ready`, HPA ativo (CPU 3% / 70%,
+memória 42% / 85%, 2 réplicas de 2 a 10), Cluster Autoscaler e metrics-server em execução.
+Custo total da sessão: ~US$ 0,50.
+
+### Desenho
+
+```
+                    Cliente
+                       │
+                       ▼
+        ┌──────────────────────────────────┐
+        │   API Gateway (HTTP API)         │   única porta pública
+        │                                  │   throttling + log de acesso
+        │  /realms/*  sem authorizer ──────┼──────────┐
+        │  /health    sem authorizer       │          │
+        │  /api/*     Lambda Authorizer ───┼────┐     │
+        └───────────────┬──────────────────┘    │     │
+                        │                       │     │
+                   ┌────▼─────┐                 │     │
+                   │  Lambda  │ valida JWT      │     │
+                   │ Node 22  │ (JWKS em cache) │     │
+                   └──────────┘                 │     │
+                                                │     │
+        ══════════ VPC Link ══════════════════════════════════
+                                                │     │
+        ┌───────────────────────────────────────▼─────▼──────┐
+        │  NLB interno  (subnets privadas, sem IP público)   │
+        │     :80 → NodePort 30080        :81 → 30081        │
+        └───────────────┬─────────────────────────┬──────────┘
+                        │                         │
+        ┌───────────────▼──────────┐   ┌──────────▼──────────┐
+        │  EKS — API (2-10 pods)   │   │  EKS — Keycloak     │
+        │  HPA + Cluster Autoscaler│   │  emite os tokens    │
+        └───────────────┬──────────┘   └──────────┬──────────┘
+                        │                         │
+                        └────────────┬────────────┘
+                                     ▼
+                     ┌──────────────────────────────┐
+                     │  RDS PostgreSQL              │
+                     │  schema public   → aplicação │
+                     │  schema keycloak → Keycloak  │
+                     └──────────────────────────────┘
+```
+
+### As quatro decisões que sustentam o desenho
+
+**1. O cluster não tem porta pública.** Nós em subnets privadas, NLB interno, e o único
+caminho de entrada é o API Gateway via VPC Link. É isso que faz o requisito de "API Gateway
+para controle e roteamento" ser real: se houvesse um Ingress público, o gateway seria
+contornável e todo o controle nele seria decorativo. A cadeia de security groups é explícita —
+cada elo libera a porta apenas para o security group anterior, nunca para um CIDR.
+
+O endpoint da **API do Kubernetes** é público (protegido por autenticação IAM), porque o
+`kubectl` do CI precisa alcançá-lo. São duas superfícies diferentes: a aplicação não tem
+caminho público; o plano de controle tem, e exige credencial da conta.
+
+**2. A Lambda autentica na borda; o Keycloak continua emitindo.** A function valida assinatura,
+`iss`, `exp` e `nbf` do JWT antes de o tráfego entrar na VPC — quem não tem token válido recebe
+403 sem consumir nó do cluster, sem abrir conexão no banco e sem aparecer no log da aplicação.
+Zero dependências: só `node:crypto`, então o pacote de deploy são três arquivos `.mjs`, sem
+`npm install` e sem bundler.
+
+A aplicação **revalida** o mesmo token. A redundância é intencional: o authorizer protege o
+perímetro, a validação no serviço garante que uma falha de configuração no gateway não vire
+acesso irrestrito — e a autorização por role (`@PreAuthorize`) precisa das claims dentro da
+aplicação de todo jeito.
+
+**3. Nenhuma linha de Java mudou.** O [`application-prod.yml`](src/main/resources/application-prod.yml)
+já lia `OAUTH2_ISSUER_URI` e `OAUTH2_JWK_URI` de ambiente, separadamente — e a separação virou
+essencial aqui:
+
+| Variável            | Valor                               | Por quê                                                                 |
+|---------------------|-------------------------------------|-------------------------------------------------------------------------|
+| `OAUTH2_ISSUER_URI` | `https://<api-gw>/realms/autopecas` | É uma **identidade**: tem que ser igual ao `iss` que o Keycloak escreve. |
+| `OAUTH2_JWK_URI`    | `http://keycloak:8080/.../certs`    | É um **endereço**: resolvido pelo Service, sem sair para a internet.     |
+
+**4. O Keycloak usa o mesmo banco, em schema separado.** Na Fase 2 eram dois bancos. No RDS,
+criar um segundo exigiria rodar `CREATE DATABASE` de dentro da VPC. Um schema (`keycloak`)
+resolve igual de bem e o motivo original se mantém: as tabelas do Keycloak ficam fora do
+`public`, onde o Flyway e o `ddl-auto: validate` trabalham.
+
+### Escalabilidade — dois níveis
+
+| Nível | Componente         | Faixa          | Sinal                                   |
+|-------|--------------------|----------------|-----------------------------------------|
+| Pods  | HPA                | 2 → 10         | CPU a 70% (memória a 85% como proteção) |
+| Nós   | Cluster Autoscaler | 2 → 4 t3.medium| Pods `Pending` por falta de espaço      |
+
+Um sem o outro não entrega elasticidade: só HPA esbarra no teto da frota fixa e deixa pods
+`Pending`; só Cluster Autoscaler nunca é acionado, porque sem HPA a contagem de pods não muda.
+
+Os alvos do HPA vieram de medição e não mudaram ao sair do `kind` — ver o raciocínio em
+[`infra/k8s/aws/40-app-hpa.yaml`](infra/k8s/aws/40-app-hpa.yaml). O que mudou foi o teto, e
+por um motivo aritmético: `maxReplicas` tem que conversar com `node_max_size`, senão subir um
+sem o outro não aumenta capacidade real.
+
+### Estrutura
+
+```
+infra/
+├── terraform/
+│   ├── *.tf                 Fase 2 — cluster kind local (intocado)
+│   └── aws/
+│       ├── _conta/          OPCIONAL: usuário operador + budget da conta
+│       ├── _backend/        bucket S3 do state, ECR, papel OIDC do GitHub
+│       ├── 01-network/      VPC, subnets, NAT, security groups
+│       ├── 02-database/     RDS PostgreSQL
+│       ├── 03-cluster/      EKS, node group, autoscaler, NLB interno
+│       └── 04-gateway-auth/ API Gateway, Lambda, VPC Link, config da app
+├── lambda/authorizer/       Lambda Authorizer + testes (node --test)
+├── docker/
+│   └── toolbox.Dockerfile   Terraform + AWS CLI + kubectl numa imagem
+├── scripts/
+│   ├── up.sh                provisiona as 5 stacks, na ordem
+│   ├── deploy.sh            imagem no ECR + manifestos no cluster
+│   ├── smoke.sh             verificação ponta a ponta pelo gateway
+│   └── down.sh              destrói na ordem inversa
+└── k8s/
+    ├── *.yaml               Fase 2 — manifestos do ambiente kind
+    └── aws/                 manifestos do EKS
+```
+
+Quatro stacks de ambiente e não uma, porque os ciclos de vida são diferentes: a rede muda quase
+nunca, o banco raramente, o cluster a cada ajuste de capacidade, o gateway a cada deploy da
+Lambda. State único obrigaria a passar um `plan` de 200 recursos para trocar uma variável de
+ambiente — e um erro em qualquer lugar bloquearia tudo. Cada uma lê os outputs da anterior pelo
+state no S3, então a ordem numérica não é estética.
+
+O `_backend` usa state **local** por necessidade: ele cria o bucket onde as outras guardam o
+state, e não pode guardar o próprio num bucket que ainda não existe. Esse state fica fora do git;
+perdê-lo não é grave, basta um `terraform import` do bucket.
+
+**Por que o `04` cria o ConfigMap da aplicação.** Parece fora de lugar, mas é o único arranjo sem
+dependência circular: o `OAUTH2_ISSUER_URI` da aplicação é a URL do API Gateway, que só existe no
+`04`, enquanto o API Gateway precisa do NLB, que nasce no `03`. Com o ConfigMap no `03`, as duas
+stacks dependeriam uma da outra. A leitura que resolve o desconforto: o ConfigMap **é o
+contrato** entre a camada de autenticação e a aplicação (quem emite o token, onde está a chave
+pública), e quem define o contrato é quem emite o token.
+
+### Como avaliar sem conta AWS
+
+Nada a instalar além do Docker, e nenhum custo. A ordem de leitura que faz o desenho se explicar
+sozinho:
+
+1. **[`01-network/security-groups.tf`](infra/terraform/aws/01-network/security-groups.tf)** — a
+   cadeia de confiança do tráfego. Cada elo libera a porta apenas para o security group
+   anterior, nunca para um CIDR. É o que torna o API Gateway a única porta de entrada.
+2. **[`infra/lambda/authorizer/jwt.mjs`](infra/lambda/authorizer/jwt.mjs)** — a validação do
+   token. A lista fechada de algoritmos no topo é a defesa contra confusão de algoritmo; os
+   testes em [`jwt.test.mjs`](infra/lambda/authorizer/jwt.test.mjs) exercitam os dois ataques
+   clássicos (`alg: none` e HS256 assinado com a chave pública).
+3. **[`03-cluster/nodes.tf`](infra/terraform/aws/03-cluster/nodes.tf)** — o dimensionamento dos
+   nós, com a aritmética que levou a `t3.medium` em vez do `t3.small` mais barato.
+4. **[`04-gateway-auth/apigateway.tf`](infra/terraform/aws/04-gateway-auth/apigateway.tf)** — as
+   rotas, e quais passam pelo authorizer e quais não.
+
+Os arquivos de infraestrutura são comentados com a **razão** de cada decisão, não com a
+descrição do que o código faz.
+
+**Validação estática**, com a raiz do repositório montada:
+
+```bash
+# Formatação de todas as stacks
+docker run --rm -v "$PWD:/repo" -w /repo/infra/terraform/aws \
+  hashicorp/terraform:1.10.5 fmt -check -recursive
+
+# Validação, stack por stack
+for s in _conta _backend 01-network 02-database 03-cluster 04-gateway-auth; do
+  docker run --rm -v "$PWD:/repo" -w "/repo/infra/terraform/aws/$s" \
+    -e TF_DATA_DIR=/tmp/tf --entrypoint sh hashicorp/terraform:1.10.5 \
+    -c 'terraform init -backend=false -input=false >/dev/null && terraform validate'
+done
+
+# Manifestos do Kubernetes, o mesmo que o CI faz
+docker run --rm -v "$PWD:/repo" ghcr.io/yannh/kubeconform:latest \
+  -summary -strict -kubernetes-version 1.31.0 /repo/infra/k8s/aws
+
+# Testes da Lambda (Node 18+)
+node --test infra/lambda/authorizer/jwt.test.mjs
+```
+
+Dois detalhes importam:
+
+- **Monte a raiz do repositório**, não `infra/terraform/aws`. A stack `04` lê
+  `keycloak/realm-export.json` por um caminho relativo que sai dessa pasta; montando só ela, o
+  `validate` falha com "no file exists", que é artefato do mount e não erro do código.
+- **O `validate` não conversa com a AWS.** Ele confere sintaxe, referências e tipos, mas não lê
+  o remote state das outras stacks nem sabe se a API aceitará cada recurso. Combinação inválida
+  de atributos, cota estourada e nome já em uso só aparecem no `plan`/`apply` — por isso a
+  [execução de referência](#execução-de-referência) existe.
+
+### Como subir na sua conta AWS
+
+#### Pré-requisitos da máquina
+
+| Requisito | Por quê | Se faltar |
+|---|---|---|
+| **Docker** | Constrói a imagem da aplicação e a imagem `toolbox` com Terraform, AWS CLI e kubectl | Os scripts param com mensagem explícita |
+| **bash** | Os scripts de `infra/scripts/` são bash | **No Windows:** use **Git Bash** (vem com o Git) ou WSL. Eles **não** rodam em PowerShell nem cmd |
+| **curl** | O `smoke.sh` usa para as chamadas HTTP | Presente no macOS, Linux e Git Bash |
+
+Terraform, AWS CLI e kubectl **não** precisam estar instalados: os scripts usam o binário local
+quando ele existe e, quando não, a imagem [`toolbox`](infra/docker/toolbox.Dockerfile), que eles
+mesmos constroem. `java` é opcional — sem ele os testes são pulados e a aplicação é compilada
+dentro do próprio Dockerfile.
+
+A imagem oficial `hashicorp/terraform` serve para `fmt` e `validate`, mas **não para `apply`**:
+as stacks 03 e 04 autenticam no cluster com `exec { command = "aws" }`, e ela não traz o AWS CLI.
+O erro (`exec: aws: executable file not found`) só aparece depois de as duas primeiras stacks
+passarem. O toolbox existe por isso, e usa AWS CLI ≥ 2.32 para aceitar perfis do `aws login`.
+
+#### O que a conta AWS precisa ter
+
+| Requisito | Detalhe |
+|---|---|
+| Permissão | Criar VPC, EKS, RDS, IAM, Lambda, API Gateway. Na prática, `AdministratorAccess` numa conta de estudo — ou o usuário restrito da stack [`_conta`](#opcional-a-stack-_conta). |
+| Credencial | `aws login`, usuário IAM com access key, perfil do AWS SSO ou credencial temporária. Evite a conta raiz: quem roda o `up.sh` vira administrador do cluster. |
+| **Cota de vCPU** | **≥ 8 vCPUs** de instâncias On-Demand Standard. Ver abaixo. |
+
+A cota de vCPU é o bloqueio mais comum e o menos óbvio. Conta recém-criada costuma vir com
+**5 vCPUs**: o ambiente **sobe** (dois `t3.medium` são 4 vCPUs), mas o **autoscaling de nós
+falha** — o terceiro nó pediria 6 e é recusado, com a mensagem enterrada nos eventos do Auto
+Scaling Group. O `up.sh` confere e avisa antes de provisionar. O aumento é gratuito e costuma
+sair em minutos: Service Quotas → EC2 → *Running On-Demand Standard (A, C, D, H, I, M, R, T, Z)
+instances* → 8 ou mais. Sem pedir aumento, `node_max_size = 2` mantém o HPA demonstrável
+(2 → 10 pods sobre 2 nós).
+
+#### Opcional: a stack `_conta`
+
+Para quem usa conta pessoal. Aplicada **uma vez, pelo dono da conta** (root ou admin), e fora do
+`up.sh`/`down.sh` de propósito — o budget precisa sobreviver a um `down.sh`. Ela cria:
+
+- o usuário `autopecas-operador`, que roda as outras stacks no lugar do root, com permissão
+  restrita aos serviços e ao prefixo do projeto e **sem chave de acesso**: autentica com
+  `aws login` (console + MFA);
+- um budget mensal da conta inteira, com alerta por e-mail em 50/80/100% do gasto real e 100%
+  do previsto. A AWS não tem teto rígido de gasto: o budget avisa, com até ~24h de atraso.
+
+```bash
+cd infra/terraform/aws/_conta
+cp terraform.tfvars.example terraform.tfvars   # e-mail e limite do budget
+terraform init && terraform apply
+terraform output -raw proximos_passos          # senha e MFA do operador, no console
+```
+
+O que a política do operador **não** fecha, e o próximo passo para fechar, está no cabeçalho de
+[`_conta/operador.tf`](infra/terraform/aws/_conta/operador.tf). Quem avalia com conta de
+laboratório ou credencial própria pula esta stack.
+
+#### Passo a passo
+
+```bash
+# 1. Credencial da AWS (uma destas formas)
+aws login            # login do console, sem chave de acesso (AWS CLI >= 2.32)
+# ou:  aws configure
+# ou:  export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_SESSION_TOKEN=...
+# ou:  export AWS_PROFILE=meu-perfil
+
+./infra/scripts/up.sh       # 2. provisiona as 5 stacks na ordem   (~50 min)
+./infra/scripts/deploy.sh   # 3. testes, imagem no ECR, manifestos (~10 min)
+./infra/scripts/smoke.sh    # 4. verifica ponta a ponta            (~2 min)
+./infra/scripts/down.sh --tudo   # 5. DERRUBA — ver Custo
+```
+
+- Sem o AWS CLI instalado, use as variáveis de ambiente: os scripts as repassam ao container.
+  Com `aws login`, cuja credencial dura só 15 minutos, o container a renova sozinho durante o
+  apply.
+- O `up.sh` **gera** o `backend.hcl` e o `terraform.tfvars` a partir dos outputs da stack
+  `_backend`. Os scripts são **idempotentes**: interrompidos no meio, basta rodar de novo.
+- O `down.sh` pede confirmação digitando `destruir`.
+
+**Passo a passo manual equivalente**, sem os scripts (exige Terraform e AWS CLI locais, ou o
+toolbox):
+
+```bash
+cd infra/terraform/aws
+
+# Uma vez por conta
+terraform -chdir=_backend init && terraform -chdir=_backend apply   # state local
+terraform -chdir=_backend output -raw state_bucket                  # anote o nome
+cp backend.hcl.example backend.hcl                                  # preencha com o bucket
+cp terraform.tfvars.example terraform.tfvars
+
+# Toda vez
+for stack in 01-network 02-database 03-cluster 04-gateway-auth; do
+  terraform -chdir=$stack init -backend-config=../backend.hcl
+  terraform -chdir=$stack apply -var-file=../terraform.tfvars
+done
+```
+
+### O que o `smoke.sh` verifica
+
+Quatro casos, escolhidos para que cada um falhe por um motivo diferente:
+
+| # | Chamada | Esperado | O que prova |
+|---|---|---|---|
+| 1 | `GET /health` sem token | `200` | Gateway → VPC Link → NLB → pod → RDS funcionam |
+| 2 | `GET /api/clientes` sem token | `401`/`403` | O authorizer barra na borda, sem consumir o cluster |
+| 3 | `GET /api/clientes` com token válido | `200` | O authorizer libera, e o `iss` concorda nas três pontas |
+| 4 | `GET /api/clientes` com token adulterado | `403` | A assinatura é realmente verificada |
+
+O caso 4 é o que importa: sem ele, um authorizer que devolvesse "autorizado" para qualquer
+requisição passaria nos três primeiros.
+
+**Credenciais de teste.** O realm importado de [`keycloak/realm-export.json`](keycloak/realm-export.json)
+traz o usuário `test_user` / senha `1234` (role `ADMIN`, client público `autopecas-api` com
+*direct access grants*). Senha fraca em arquivo versionado é inadequada para produção; aqui é
+deliberado: o realm é descartável e recriado a cada deploy, e a avaliação funciona sem troca de
+credenciais fora do repositório.
+
+```bash
+API=$(docker run --rm -v "$PWD:/repo" -w /repo/infra/terraform/aws/04-gateway-auth \
+        autopecas-toolbox:local terraform output -raw api_base_url)
+
+TOKEN=$(curl -s -X POST "$API/realms/autopecas/protocol/openid-connect/token" \
+  -d grant_type=password -d client_id=autopecas-api \
+  -d username=test_user -d password=1234 | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+
+curl -i "$API/api/clientes" -H "Authorization: Bearer $TOKEN"
+```
+
+O Swagger UI fica em `$API/swagger-ui.html`, publicado sem authorizer.
+
+### Custo
+
+**~US$ 183/mês com tudo ligado 24/7**, em `us-east-1`. Não é um ambiente gratuito.
+
+| Item                           | Mensal       | Observação                                    |
+|--------------------------------|--------------|-----------------------------------------------|
+| EKS control plane              | ~US$ 73      | Inevitável. Cobrado por hora de cluster.      |
+| 2× `t3.medium` (node group)    | ~US$ 60      | Vai a ~US$ 120 se o autoscaler chegar a 4 nós.|
+| NAT Gateway (1)                | ~US$ 32      | + tráfego. Maior custo evitável.              |
+| NLB interno                    | ~US$ 16      | + LCU.                                        |
+| RDS `db.t4g.micro`             | US$ 0        | Free Tier por 12 meses; depois ~US$ 12.       |
+| API Gateway + Lambda + logs    | < US$ 2      | Volume de avaliação fica quase todo no Free Tier. |
+| **Total**                      | **~US$ 183** |                                               |
+
+Rodando por **duas horas** para avaliar, o custo fica em torno de **US$ 0,50** — foi o medido
+na [execução de referência](#execução-de-referência) —, desde que o ambiente seja destruído depois:
+
+```bash
+./infra/scripts/down.sh --tudo    # remove tudo, inclusive o banco e os dados
+./infra/scripts/down.sh           # remove só cluster e gateway (~US$ 149/mês dos 183)
+```
+
+O `down.sh` sem argumento preserva rede e banco, deixando o ambiente "dormindo" por ~US$ 34/mês
+com os dados intactos. Em qualquer caso o `_backend` (bucket de state e ECR) fica, por custar
+centavos e permitir subir de novo sem recomeçar do zero.
+
+Três observações honestas:
+
+- **O NAT Gateway é o preço de manter os nós em subnet privada.** Sem saída para a internet eles
+  não baixam imagem nem entram no cluster. Um endpoint de S3 (gateway, gratuito) evita que o
+  download das camadas de imagem passe por ele.
+- **`t3.medium` e não `t3.small`**, que seria metade do preço. Com `t3.small` sobram ~900 MiB
+  por nó, ou seja UMA réplica da API (768 MiB) por nó: o HPA precisaria de um nó novo a cada
+  réplica, e o autoscaling existiria só no papel. A conta completa está em
+  [`03-cluster/nodes.tf`](infra/terraform/aws/03-cluster/nodes.tf).
+- **`us-east-1` e não `sa-east-1`.** São Paulo cobra o dobro pelo NAT Gateway e ~45% mais pelas
+  instâncias. A região é variável — em São Paulo, conte ~US$ 260/mês.
+
+### Arquivos que não estão no repositório
+
+Decisão de projeto, não esquecimento. Estes arquivos são **específicos de quem provisionou**:
+
+| Arquivo | Por que não está no repo | Quem cria |
+|---|---|---|
+| `backend.hcl` | Nome do bucket de state, único na conta de quem rodou | `up.sh`, a partir do output da stack `_backend` |
+| `terraform.tfvars` | Deriva do bucket acima (na `_conta`, leva o e-mail do budget) | `up.sh` / quem aplica a `_conta` |
+| State local do `_backend` e da `_conta` | Lista recursos de uma conta específica | `terraform apply` |
+
+**Nenhum valor específico de conta existe no código versionado** — nem ID de conta, nem ARN, nem
+nome de bucket, nem endereço de banco. A URL do ECR é lida de `terraform output` em tempo de
+execução, e o bucket de state recebe sufixo aleatório, porque nome de bucket S3 é único entre
+todas as contas da AWS. É isso que permite provisionar em qualquer conta sem editar uma linha.
+
+### CI/CD
+
+| Workflow                                                          | Gatilho               | O que faz                                                                 |
+|-------------------------------------------------------------------|-----------------------|---------------------------------------------------------------------------|
+| [`ci-infra-aws.yml`](.github/workflows/ci-infra-aws.yml)          | PR e push em `infra/` | Testes da Lambda, `terraform validate` nas 5 stacks, `kubeconform`        |
+| [`cd-aws.yml`](.github/workflows/cd-aws.yml)                      | push em `main`        | Build, push no ECR com tag do commit, deploy no EKS, smoke test, rollback |
+
+Três pontos deliberados:
+
+- **O CI de infraestrutura não tem credencial da AWS.** Ele roda em pull request, inclusive de
+  fork — e um workflow que roda em PR e tem credencial é um caminho de exfiltração.
+- **O pipeline de deploy não pode rodar `terraform apply`.** O papel que ele assume via OIDC
+  publica imagem no ECR e descreve o cluster, nada além. Um papel capaz de aplicar as quatro
+  stacks precisaria criar papéis IAM, VPCs e bancos — seria praticamente administrador da conta,
+  acessível a partir de um push. Provisionar é manual, com credencial pessoal.
+- **O papel OIDC é opcional** (`enable_github_oidc = false` por padrão). Quem clona para avaliar
+  não tem repositório configurado, e um `github_repository` errado criaria um papel que ninguém
+  consegue assumir — com uma mensagem de erro que não diz qual condição falhou. O
+  [`deploy.sh`](infra/scripts/deploy.sh) é o caminho equivalente sem pipeline.
+
+Nenhuma chave de acesso estática: a autenticação é por OIDC, com credencial temporária de 1h
+amarrada ao repositório informado. Por depender de secrets do repositório, o
+[`cd-aws.yml`](.github/workflows/cd-aws.yml) **não funciona num fork** — é esperado, e o
+`deploy.sh` cobre o mesmo caminho com a credencial de quem está no terminal.
+
+### Limitações conhecidas
+
+Declaradas porque são decisões, não descobertas:
+
+- **O Keycloak é réplica única.** O modo `start-dev` não forma cluster e o import de realm não é
+  coordenado entre instâncias. A aplicação não cai com ele — valida assinatura com a chave
+  pública em cache —, mas ninguém obtém token novo enquanto estiver fora. Escalar exigiria
+  `kc.sh build` + `start --optimized` com cache Infinispan.
+- **Um NAT Gateway, não um por AZ.** São ~US$ 32/mês cada. A queda da AZ do NAT tira a saída de
+  internet dos nós da outra zona: os pods de pé continuam atendendo, mas um pod novo não baixa
+  imagem.
+- **A senha do RDS passa pelo state da stack 04**, que precisa materializar o Secret do
+  Kubernetes. O state fica em bucket S3 cifrado; o caminho que elimina isso é o External Secrets
+  Operator, lendo o Secrets Manager de dentro do cluster.
+- **O console administrativo do Keycloak não é publicado** no API Gateway. O acesso é por
+  `kubectl port-forward`, autenticado pelo IAM antes de chegar ao Keycloak.
+- **O autoscaling sob carga não está na execução de referência.** O HPA e o Cluster Autoscaler
+  subiram e ficaram ativos, mas a demonstração de escala exige gerar tráfego de propósito — o
+  procedimento é o mesmo da seção [Autoscaling](#autoscaling-como-verificar), apontando para a
+  URL do gateway.
 
 ---
 ## 🧪 Testes e Cobertura

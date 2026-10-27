@@ -1,0 +1,297 @@
+# =============================================================================
+# CD — publica a imagem no ECR e faz o deploy no EKS.
+#
+# O que este workflow NÃO faz: `terraform apply`. O papel que ele assume tem
+# permissão para publicar imagem e descrever o cluster, e nada mais — ver o
+# comentário em infra/terraform/aws/_backend/github-oidc.tf. Provisionar é
+# manual, a partir de credencial pessoal; o pipeline cuida do que acontece
+# muitas vezes por dia.
+#
+# Pré-requisitos (saídas da stack _backend):
+#
+#   secret  AWS_DEPLOY_ROLE_ARN   papel assumido via OIDC
+#   secret  ECR_REPOSITORY        URL do repositório ECR
+#   var     AWS_REGION            opcional, us-east-1 por padrão
+#   var     EKS_CLUSTER_NAME      opcional, autopecas-eks por padrão
+#   var     API_BASE_URL          opcional; com ela, roda o smoke test externo
+#
+# E, do lado do EKS, o papel precisa estar em `cluster_admin_role_arns` da
+# stack 03 — sem isso o `kubectl` autentica e não autoriza nada.
+# =============================================================================
+name: CD - Deploy AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      pular_testes:
+        description: 'Pular os testes (use só para redeploy de código já testado)'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - 'infra/k8s/aws/**'
+      - '.github/workflows/cd-aws.yml'
+
+# `id-token: write` é o que permite ao job pedir o token OIDC ao GitHub. Sem
+# ele, a autenticação na AWS falha com uma mensagem que não menciona permissão.
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME || 'autopecas-eks' }}
+  K8S_NAMESPACE: autopecas
+
+# Dois deploys simultâneos no mesmo cluster se atropelam: o segundo pode
+# aplicar manifestos enquanto o rollout do primeiro ainda não terminou.
+# `cancel-in-progress: false` porque abortar um rollout no meio deixa o
+# Deployment em estado misto.
+concurrency:
+  group: cd-aws-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ===========================================================================
+  # 1. Build e testes
+  # ===========================================================================
+  build:
+    name: Build e testes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Permissão no Maven Wrapper
+        run: chmod +x mvnw
+
+      - name: Testes
+        if: ${{ !inputs.pular_testes }}
+        run: ./mvnw --batch-mode clean verify
+
+      - name: Empacotar sem testes
+        if: ${{ inputs.pular_testes }}
+        run: ./mvnw --batch-mode clean package -DskipTests
+
+      - name: Guardar o artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: target/*.jar
+          retention-days: 1
+
+  # ===========================================================================
+  # 2. Imagem
+  # ===========================================================================
+  imagem:
+    name: Publicar imagem no ECR
+    runs-on: ubuntu-latest
+    needs: build
+
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Autenticar na AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e push
+        id: push
+        env:
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        run: |
+          set -euo pipefail
+
+          # A tag é o SHA do commit — nunca `latest`. Com `latest`, "qual código
+          # está rodando?" não tem resposta, e um rollback depende de lembrar
+          # qual imagem era a anterior.
+          TAG="${GITHUB_SHA::12}"
+          IMAGE="${ECR_REPOSITORY}:${TAG}"
+
+          docker build \
+            --tag "$IMAGE" \
+            --tag "${ECR_REPOSITORY}:latest" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            .
+
+          docker push "$IMAGE"
+          # `latest` existe só por conveniência de inspeção manual; nada no
+          # cluster a referencia.
+          docker push "${ECR_REPOSITORY}:latest"
+
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "Publicado: $IMAGE"
+
+  # ===========================================================================
+  # 3. Deploy
+  # ===========================================================================
+  deploy:
+    name: Deploy no EKS
+    runs-on: ubuntu-latest
+    needs: imagem
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Autenticar na AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+
+      - name: Configurar kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name "${EKS_CLUSTER_NAME}" \
+            --region "${AWS_REGION}"
+          kubectl cluster-info
+
+      - name: Conferir que a configuração do Terraform já está no cluster
+        # O Deployment lê o ConfigMap e o Secret criados pela stack 04. Aplicar
+        # sem eles produz um pod em CreateContainerConfigError, cuja mensagem
+        # não deixa óbvio que falta rodar o Terraform.
+        run: |
+          set -euo pipefail
+          faltando=0
+          for recurso in configmap/autopecas-config secret/autopecas-secrets \
+                         configmap/keycloak-config secret/keycloak-secrets \
+                         configmap/keycloak-realm; do
+            if ! kubectl get "$recurso" -n "${K8S_NAMESPACE}" >/dev/null 2>&1; then
+              echo "::error::$recurso não existe no namespace ${K8S_NAMESPACE}"
+              faltando=1
+            fi
+          done
+          if [ "$faltando" -eq 1 ]; then
+            echo "::error::Rode a stack 04-gateway-auth antes do deploy."
+            exit 1
+          fi
+          echo "Configuração presente."
+
+      - name: Substituir a imagem nos manifestos
+        env:
+          IMAGE: ${{ needs.imagem.outputs.image }}
+        run: |
+          set -euo pipefail
+          # `|` como delimitador porque a URL do ECR contém barras.
+          sed -i "s|IMAGE_URI|${IMAGE}|g" infra/k8s/aws/30-app-deployment.yaml
+          grep -n 'image:' infra/k8s/aws/30-app-deployment.yaml
+
+      - name: Aplicar manifestos
+        run: kubectl apply -f infra/k8s/aws/
+
+      - name: Aguardar o Keycloak
+        # Verificado primeiro porque é o mais lento do stack (augmentation do
+        # Quarkus + import do realm). Esperar a API antes consumiria a janela de
+        # timeout disponível para ele.
+        run: |
+          kubectl rollout status deployment/keycloak \
+            -n "${K8S_NAMESPACE}" --timeout=15m
+
+      - name: Aguardar a API
+        id: rollout
+        run: |
+          kubectl rollout status deployment/autopecas-api \
+            -n "${K8S_NAMESPACE}" --timeout=10m
+
+      - name: Diagnóstico da falha
+        if: failure() && steps.rollout.outcome == 'failure'
+        run: |
+          echo "── Pods ─────────────────────────────────────────"
+          kubectl get pods -n "${K8S_NAMESPACE}" -o wide
+          echo "── Eventos ──────────────────────────────────────"
+          kubectl get events -n "${K8S_NAMESPACE}" \
+            --sort-by='.lastTimestamp' | tail -40
+          echo "── Logs da API ──────────────────────────────────"
+          kubectl logs deployment/autopecas-api \
+            -n "${K8S_NAMESPACE}" --tail=200 --all-containers || true
+          echo "── Describe ─────────────────────────────────────"
+          kubectl describe deployment/autopecas-api -n "${K8S_NAMESPACE}" || true
+
+      - name: Reverter em caso de falha
+        if: failure() && steps.rollout.outcome == 'failure'
+        # `maxUnavailable: 0` garante que as réplicas antigas seguem atendendo
+        # durante um rollout que falhou — então reverter restaura o estado
+        # anterior sem janela de indisponibilidade.
+        run: |
+          echo "::warning::Rollout falhou; revertendo para a revisão anterior."
+          kubectl rollout undo deployment/autopecas-api -n "${K8S_NAMESPACE}"
+          kubectl rollout status deployment/autopecas-api \
+            -n "${K8S_NAMESPACE}" --timeout=10m
+
+      - name: Smoke test pelo API Gateway
+        # Só roda se a URL estiver configurada. Vale mais que o rollout status:
+        # exercita o caminho COMPLETO — gateway, VPC Link, NLB, kube-proxy, pod
+        # — que é onde moram os erros de rede que o rollout não enxerga.
+        if: ${{ vars.API_BASE_URL != '' }}
+        run: |
+          set -euo pipefail
+          BASE="${{ vars.API_BASE_URL }}"
+
+          echo "── /health deve responder 200 ───────────────────"
+          for tentativa in $(seq 1 20); do
+            codigo=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/health" || echo 000)
+            if [ "$codigo" = "200" ]; then
+              echo "OK na tentativa ${tentativa}"
+              break
+            fi
+            echo "tentativa ${tentativa}: HTTP ${codigo}"
+            if [ "$tentativa" = "20" ]; then
+              echo "::error::/health não respondeu 200"
+              exit 1
+            fi
+            sleep 15
+          done
+
+          echo "── /api/* SEM token deve responder 401 ou 403 ───"
+          # A verificação que prova o authorizer funcionando. Um 200 aqui
+          # significaria API aberta; um 404 significaria rota não publicada.
+          codigo=$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/api/clientes")
+          case "$codigo" in
+            401|403) echo "OK: HTTP ${codigo}" ;;
+            *)
+              echo "::error::esperado 401/403 sem token, veio HTTP ${codigo}"
+              exit 1
+              ;;
+          esac
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "## Deploy AWS"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Imagem | \`${{ needs.imagem.outputs.image }}\` |"
+            echo "| Commit | \`${GITHUB_SHA::12}\` |"
+            echo "| Cluster | \`${EKS_CLUSTER_NAME}\` |"
+            echo
+            echo '```'
+            kubectl get pods,hpa -n "${K8S_NAMESPACE}" 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

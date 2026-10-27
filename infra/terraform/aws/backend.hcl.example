@@ -1,0 +1,15 @@
+# Configuração parcial do backend, compartilhada pelas quatro stacks.
+#
+#   cp backend.hcl.example backend.hcl
+#   # preencha `bucket` com a saída `state_bucket` da stack _backend
+#   terraform -chdir=01-network init -backend-config=../backend.hcl
+#
+# Um bloco `backend` não aceita variáveis nem interpolação — é por isso que
+# estes dois valores vêm de arquivo em vez de tfvars. A chave (`key`) de cada
+# stack fica no versions.tf dela, para que duas stacks não possam apontar para
+# o mesmo arquivo de state por engano.
+#
+# Este arquivo não é versionado: o nome do bucket é específico da sua conta.
+
+bucket = "autopecas-tfstate-PREENCHER"
+region = "us-east-1"

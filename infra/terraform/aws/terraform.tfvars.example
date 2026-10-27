@@ -1,0 +1,47 @@
+# Valores compartilhados pelas stacks 01 a 04.
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#   terraform -chdir=02-database apply -var-file=../terraform.tfvars
+#
+# Um único arquivo para as quatro stacks em vez de um por stack: `project_name`
+# e `aws_region` PRECISAM ser idênticos nas quatro — é por eles que os recursos
+# se encontram. Duplicá-los em quatro arquivos é convidar a divergência, e o
+# sintoma seria um "recurso não encontrado" no meio de um apply.
+#
+# Não versionado. Nenhuma senha mora aqui: a do banco é gerada pelo RDS e a do
+# admin do Keycloak, pelo Terraform.
+
+# ─── Obrigatório ─────────────────────────────────────────────────────────────
+
+# Saída `state_bucket` da stack _backend.
+state_bucket = "autopecas-tfstate-PREENCHER"
+
+# ─── Identidade (precisa ser igual nas quatro stacks) ────────────────────────
+
+project_name = "autopecas"
+
+# us-east-1 por causa de custo: São Paulo cobra o dobro pelo NAT Gateway e ~45%
+# mais pelas instâncias. Ver a seção "Custo" no README da raiz.
+aws_region = "us-east-1"
+
+# ─── Acesso administrativo ao cluster ────────────────────────────────────────
+
+# Papel que o GitHub Actions assume via OIDC. Sem ele aqui, todo `kubectl` do
+# pipeline devolve 401 — e a mensagem não diz que o problema é access entry.
+# cluster_admin_role_arns = ["arn:aws:iam::123456789012:role/autopecas-github-actions"]
+
+# ─── Dimensionamento (descomente para ajustar) ───────────────────────────────
+
+# node_instance_type = "t3.medium"   # a conta do porquê está em 03-cluster/nodes.tf
+# node_min_size      = 2
+# node_max_size      = 4
+
+# instance_class     = "db.t4g.micro"  # Free Tier por 12 meses
+# multi_az           = false           # true dobra o custo da instância
+
+# ─── Gateway ─────────────────────────────────────────────────────────────────
+
+# throttling_rate_limit  = 100
+# throttling_burst_limit = 200
+# expose_swagger         = true
+# cors_allow_origins     = ["*"]

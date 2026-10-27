@@ -1,0 +1,21 @@
+# =============================================================================
+# Namespace da aplicação no EKS.
+#
+# Também criado pelo Terraform (infra/terraform/aws/04-gateway-auth), pelo mesmo
+# motivo do ambiente kind: o Terraform precisa dele para criar os Secrets, e os
+# manifestos precisam dele para funcionar num cluster que não veio daquele
+# Terraform. Aplicar os dois é idempotente — o segundo só reconcilia labels.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: autopecas
+  labels:
+    app.kubernetes.io/part-of: autopecas
+    # `baseline` em enforce e `restricted` apenas em audit/warn: o Keycloak e a
+    # API satisfazem restricted, mas o initContainer do Keycloak roda com um
+    # usuário fixo da imagem do Postgres, e enforce restricted exigiria
+    # declarar mais do que vale aqui. Os avisos continuam visíveis.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

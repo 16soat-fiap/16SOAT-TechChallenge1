@@ -1,0 +1,166 @@
+# =============================================================================
+# CI da infraestrutura AWS — validação estática, sem tocar em nuvem nenhuma.
+#
+# Nenhum passo aqui precisa de credencial da AWS, e isso é de propósito: este
+# workflow roda em pull request de qualquer origem, inclusive de fork. Um
+# workflow que roda em PR e tem credencial é um caminho de exfiltração.
+#
+# `terraform validate` pega o que mais acontece ao escrever estas stacks:
+# referência a output que não existe, atributo com nome errado, tipo trocado.
+# O que ele NÃO pega é se o recurso será aceito pela API da AWS — isso só o
+# `plan` com credencial descobre, e ele roda na máquina de quem aplica.
+# =============================================================================
+name: CI - Infraestrutura AWS
+
+on:
+  push:
+    branches: [main, develop, refactor/arquitetura-hexagonal]
+    paths:
+      - 'infra/terraform/aws/**'
+      - 'infra/lambda/**'
+      - 'infra/k8s/aws/**'
+      - '.github/workflows/ci-infra-aws.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'infra/terraform/aws/**'
+      - 'infra/lambda/**'
+      - 'infra/k8s/aws/**'
+      - '.github/workflows/ci-infra-aws.yml'
+
+# Sem nenhuma permissão além de ler o código. Explícito em vez de herdado: o
+# padrão do repositório pode ser mais permissivo.
+permissions:
+  contents: read
+
+jobs:
+  # ===========================================================================
+  # Lambda authorizer
+  #
+  # Os testes cobrem, entre outras coisas, os dois ataques de confusão de
+  # algoritmo (`alg: none` e HS256 assinado com a chave pública). São o tipo de
+  # regressão que passa desapercebida numa revisão e abre a API inteira.
+  # ===========================================================================
+  lambda:
+    name: Testes da Lambda authorizer
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Testes
+        run: node --test infra/lambda/authorizer/jwt.test.mjs
+
+      - name: Conferir que a função não tem dependências
+        # O pacote de deploy é zipado direto do diretório, sem `npm install`.
+        # Se alguém acrescentar um `import` de pacote externo, a Lambda falha em
+        # produção com MODULE_NOT_FOUND — e só na primeira invocação. Melhor
+        # falhar aqui.
+        run: |
+          set -euo pipefail
+
+          if [ -d infra/lambda/authorizer/node_modules ]; then
+            echo "::error::node_modules encontrado — o pacote de deploy deve ser livre de dependências"
+            exit 1
+          fi
+
+          # Extrai o ALVO de cada import e exige que seja `node:*` ou um caminho
+          # relativo. Checar o alvo, em vez de casar um padrão no texto do
+          # import, evita o falso negativo óbvio: um pacote cujo nome comece com
+          # as mesmas letras de "node".
+          externos=$(
+            grep -rhoE "from '[^']+'" infra/lambda/authorizer --include='*.mjs' \
+              | sed -E "s/^from '//; s/'$//" \
+              | grep -vE '^(node:|\.)' \
+              | sort -u \
+              || true
+          )
+
+          if [ -n "$externos" ]; then
+            echo "::error::import de pacote externo detectado; só node:* e caminhos relativos são permitidos"
+            printf '%s\n' "$externos"
+            exit 1
+          fi
+
+          echo "Nenhuma dependência externa."
+
+  # ===========================================================================
+  # Terraform
+  # ===========================================================================
+  terraform:
+    name: Validar ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Uma stack com erro não esconde o resultado das outras.
+      fail-fast: false
+      matrix:
+        stack:
+          - _backend
+          - 01-network
+          - 02-database
+          - 03-cluster
+          - 04-gateway-auth
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Formatação
+        working-directory: infra/terraform/aws/${{ matrix.stack }}
+        run: terraform fmt -check -recursive -diff
+
+      - name: Init
+        working-directory: infra/terraform/aws/${{ matrix.stack }}
+        # -backend=false baixa os providers sem configurar o backend S3 — é o
+        # que permite validar sem credencial e sem o nome do bucket.
+        run: terraform init -backend=false
+
+      - name: Validate
+        working-directory: infra/terraform/aws/${{ matrix.stack }}
+        run: terraform validate
+
+  # ===========================================================================
+  # Manifestos do Kubernetes
+  #
+  # Validação de esquema contra as definições reais da API do Kubernetes, sem
+  # precisar de cluster. Pega campo com nome errado e aninhamento trocado — que
+  # num `kubectl apply` só apareceriam no momento do deploy.
+  # ===========================================================================
+  manifestos:
+    name: Validar manifestos Kubernetes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar kubeconform
+        run: |
+          VERSION=v0.6.7
+          curl -sSLo kubeconform.tar.gz \
+            "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-linux-amd64.tar.gz"
+          tar xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Validar
+        # O Deployment traz o marcador `IMAGE_URI` no lugar da imagem, trocado
+        # pelo pipeline de deploy. É um valor de string válido, então não
+        # atrapalha a validação de esquema.
+        run: |
+          kubeconform \
+            -summary \
+            -strict \
+            -kubernetes-version 1.31.0 \
+            infra/k8s/aws/

@@ -14,6 +14,7 @@
 #   var     AWS_REGION            opcional, us-east-1 por padrão
 #   var     EKS_CLUSTER_NAME      opcional, autopecas-eks por padrão
 #   var     API_BASE_URL          opcional; com ela, roda o smoke test externo
+#   var     AWS_CD_HABILITADO     "true" liga o workflow (ver o job `build`)
 #
 # E, do lado do EKS, o papel precisa estar em `cluster_admin_role_arns` da
 # stack 03 — sem isso o `kubectl` autentica e não autoriza nada.
@@ -62,6 +63,15 @@ jobs:
   build:
     name: Build e testes
     runs-on: ubuntu-latest
+    # Desligado até alguém configurar a AWS no repositório. Sem os secrets, todo
+    # push na main terminaria com o deploy FALHANDO (❌) — e um fork, ou a
+    # equipe que só usa o ambiente kind, nunca os terá. Com a guarda, o
+    # workflow aparece como ignorado. Os jobs seguintes dependem deste, então
+    # a cadeia inteira é pulada junto.
+    #
+    # Para ligar: Settings → Secrets and variables → Actions → Variables →
+    # AWS_CD_HABILITADO = true (junto com os secrets listados no topo).
+    if: vars.AWS_CD_HABILITADO == 'true'
 
     steps:
       - name: Checkout

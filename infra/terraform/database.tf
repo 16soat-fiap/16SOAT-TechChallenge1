@@ -1,5 +1,5 @@
 # =============================================================================
-# PostgreSQL — banco da aplicação e do Keycloak.
+# PostgreSQL — banco da aplicação.
 #
 # StatefulSet e não Deployment: o banco tem identidade e disco. O StatefulSet
 # garante nome estável (postgres-0) e liga o pod sempre ao MESMO PVC, enquanto
@@ -27,33 +27,6 @@ resource "kubernetes_secret" "postgres" {
   }
 
   type = "Opaque"
-}
-
-# Script executado uma única vez, quando o volume ainda está vazio: cria o banco
-# do Keycloak ao lado do banco da aplicação. Manter os dois separados evita que
-# as dezenas de tabelas do Keycloak apareçam para o `ddl-auto: validate` do
-# Hibernate e para o Flyway.
-resource "kubernetes_config_map" "postgres_init" {
-  metadata {
-    name      = "postgres-init"
-    namespace = kubernetes_namespace.autopecas.metadata[0].name
-  }
-
-  data = {
-    "01-create-keycloak-db.sh" = <<-SCRIPT
-      #!/bin/bash
-      set -euo pipefail
-
-      psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
-          SELECT 'CREATE DATABASE ${var.keycloak_database}'
-           WHERE NOT EXISTS (
-             SELECT FROM pg_database WHERE datname = '${var.keycloak_database}'
-           )\gexec
-      EOSQL
-
-      echo "Banco ${var.keycloak_database} pronto."
-    SCRIPT
-  }
 }
 
 resource "kubernetes_stateful_set" "postgres" {
@@ -120,11 +93,6 @@ resource "kubernetes_stateful_set" "postgres" {
             mount_path = "/var/lib/postgresql/data"
           }
 
-          volume_mount {
-            name       = "init"
-            mount_path = "/docker-entrypoint-initdb.d"
-            read_only  = true
-          }
 
           # pg_isready confirma que o servidor aceita conexões — mais confiável
           # que um TCP check, que responde antes do banco estar pronto.
@@ -164,13 +132,6 @@ resource "kubernetes_stateful_set" "postgres" {
           }
         }
 
-        volume {
-          name = "init"
-          config_map {
-            name         = kubernetes_config_map.postgres_init.metadata[0].name
-            default_mode = "0755"
-          }
-        }
       }
     }
 
@@ -193,7 +154,7 @@ resource "kubernetes_stateful_set" "postgres" {
   }
 
   # Sem isto o Terraform considera o StatefulSet pronto assim que a API aceita
-  # o objeto, e o Keycloak subiria antes do banco existir.
+  # o objeto, e a aplicacao subiria antes do banco existir.
   wait_for_rollout = false
 }
 

@@ -8,7 +8,6 @@
 
 # Portas do host. Altere se 8080 ou 9080 já estiverem ocupadas na sua máquina.
 # app_host_port      = 8080
-# keycloak_host_port = 9080
 
 # postgres_storage = "2Gi"
 

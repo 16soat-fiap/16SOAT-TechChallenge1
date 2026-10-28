@@ -38,9 +38,9 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Casos de uso do agregado OrdemServico.
  *
- * <p>As leituras usam a query port ConsultaOrdemServico, que já devolve o nome do cliente e a
- * placa do veículo por projeção. As escritas carregam o agregado, aplicam a regra de domínio,
- * salvam e registram o histórico da transição.
+ * <p>As leituras usam a query port ConsultaOrdemServico, que já devolve o nome do cliente e a placa
+ * do veículo por projeção. As escritas carregam o agregado, aplicam a regra de domínio, salvam e
+ * registram o histórico da transição.
  */
 public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
@@ -60,18 +60,19 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
     private final Relogio relogio;
     private final Transacao transacao;
 
-    public GestaoDeOrdensServicoUseCase(OrdemServicoRepositorio ordemServicoRepositorio,
-                                        ConsultaOrdemServico consultaOrdemServico,
-                                        ClienteRepositorio clienteRepositorio,
-                                        VeiculoRepositorio veiculoRepositorio,
-                                        FuncionarioRepositorio funcionarioRepositorio,
-                                        HistoricoStatusOSRepositorio historicoRepositorio,
-                                        ServicoRepositorio servicoRepositorio,
-                                        PecaRepositorio pecaRepositorio,
-                                        NotificadorDeStatusOS notificador,
-                                        GeradorNumeroOS geradorNumeroOS,
-                                        Relogio relogio,
-                                        Transacao transacao) {
+    public GestaoDeOrdensServicoUseCase(
+            OrdemServicoRepositorio ordemServicoRepositorio,
+            ConsultaOrdemServico consultaOrdemServico,
+            ClienteRepositorio clienteRepositorio,
+            VeiculoRepositorio veiculoRepositorio,
+            FuncionarioRepositorio funcionarioRepositorio,
+            HistoricoStatusOSRepositorio historicoRepositorio,
+            ServicoRepositorio servicoRepositorio,
+            PecaRepositorio pecaRepositorio,
+            NotificadorDeStatusOS notificador,
+            GeradorNumeroOS geradorNumeroOS,
+            Relogio relogio,
+            Transacao transacao) {
         this.servicoRepositorio = servicoRepositorio;
         this.pecaRepositorio = pecaRepositorio;
         this.notificador = notificador;
@@ -87,50 +88,68 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
     }
 
     @Override
-    public Pagina<OrdemServicoView> listar(StatusOS status, UUID clienteId, UUID mecanicoId,
-                                           PaginaRequisicao paginacao) {
+    public Pagina<OrdemServicoView> listar(
+            StatusOS status, UUID clienteId, UUID mecanicoId, PaginaRequisicao paginacao) {
         return consultaOrdemServico.listar(
                 new ConsultaOrdemServico.Filtro(status, clienteId, mecanicoId), paginacao);
     }
 
     @Override
     public OrdemServicoView porNumero(String numero) {
-        return consultaOrdemServico.porNumero(numero)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Ordem de serviço não encontrada com número: " + numero));
+        return consultaOrdemServico
+                .porNumero(numero)
+                .orElseThrow(
+                        () ->
+                                new ResourceNotFoundException(
+                                        "Ordem de serviço não encontrada com número: " + numero));
     }
 
     @Override
     public OrdemServicoView abrir(Abrir comando) {
-        return transacao.executar(() -> {
-            if (!clienteRepositorio.existePorId(comando.clienteId())) {
-                throw new ResourceNotFoundException(
-                        "Cliente não encontrado com ID: " + comando.clienteId());
-            }
-            veiculoRepositorio.porIdAtivo(comando.veiculoId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Veículo inativo ou não encontrado com ID: " + comando.veiculoId()));
+        return transacao.executar(
+                () -> {
+                    if (!clienteRepositorio.existePorId(comando.clienteId())) {
+                        throw new ResourceNotFoundException(
+                                "Cliente não encontrado com ID: " + comando.clienteId());
+                    }
+                    veiculoRepositorio
+                            .porIdAtivo(comando.veiculoId())
+                            .orElseThrow(
+                                    () ->
+                                            new ResourceNotFoundException(
+                                                    "Veículo inativo ou não encontrado com ID: "
+                                                            + comando.veiculoId()));
 
-            Atendente atendente = atendentePorEmail(comando.emailAtendente()).orElse(null);
-            UUID atendenteId = atendente != null ? atendente.getId() : null;
+                    Atendente atendente = atendentePorId(comando.idAtendente()).orElse(null);
+                    UUID atendenteId = atendente != null ? atendente.getId() : null;
 
-            OrdemServico os = OrdemServico.abrir(geradorNumeroOS.proximo(), comando.clienteId(),
-                    comando.veiculoId(), comando.queixaCliente(), comando.observacoesEntrada(),
-                    comando.quilometragemEntrada(), atendenteId);
+                    OrdemServico os =
+                            OrdemServico.abrir(
+                                    geradorNumeroOS.proximo(),
+                                    comando.clienteId(),
+                                    comando.veiculoId(),
+                                    comando.queixaCliente(),
+                                    comando.observacoesEntrada(),
+                                    comando.quilometragemEntrada(),
+                                    atendenteId);
 
-            adicionarItensDeServico(os, comando.itensServico());
-            adicionarItensDePeca(os, comando.itensPeca());
+                    adicionarItensDeServico(os, comando.itensServico());
+                    adicionarItensDePeca(os, comando.itensPeca());
 
-            OrdemServico salva = ordemServicoRepositorio.salvar(os);
+                    OrdemServico salva = ordemServicoRepositorio.salvar(os);
 
-            HistoricoStatusOS historico = atendente != null
-                    ? HistoricoStatusOS.abertura(salva.getId(), atendente)
-                    : HistoricoStatusOS.porSistema(salva.getId(), null, StatusOS.RECEBIDA,
-                            "Ordem de serviço aberta.");
-            historicoRepositorio.salvar(historico);
+                    HistoricoStatusOS historico =
+                            atendente != null
+                                    ? HistoricoStatusOS.abertura(salva.getId(), atendente)
+                                    : HistoricoStatusOS.porSistema(
+                                            salva.getId(),
+                                            null,
+                                            StatusOS.RECEBIDA,
+                                            "Ordem de serviço aberta.");
+                    historicoRepositorio.salvar(historico);
 
-            return recarregarView(salva.getId());
-        });
+                    return recarregarView(salva.getId());
+                });
     }
 
     @Override
@@ -141,27 +160,39 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
         // neste pacote — onde toda classe é, por regra de arquitetura, um caso de uso.
         AtomicReference<StatusOS> statusDeOrigem = new AtomicReference<>();
 
-        OrdemServicoView viewAtualizada = transacao.executar(() -> {
-            OrdemServico os = buscar(id);
-            StatusOS statusAnterior = os.getStatus();
-            statusDeOrigem.set(statusAnterior);
+        OrdemServicoView viewAtualizada =
+                transacao.executar(
+                        () -> {
+                            OrdemServico os = buscar(id);
+                            StatusOS statusAnterior = os.getStatus();
+                            statusDeOrigem.set(statusAnterior);
 
-            os.avancarStatus(novoStatus, relogio.agora());
-            OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
+                            os.avancarStatus(novoStatus, relogio.agora());
+                            OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
 
-            Funcionario funcionario = comando.emailFuncionario() != null
-                    ? funcionarioRepositorio.porEmail(comando.emailFuncionario()).orElse(null)
-                    : null;
+                            Funcionario funcionario =
+                                    comando.idFuncionario() != null
+                                            ? funcionarioPorSubject(comando.idFuncionario())
+                                                    .orElse(null)
+                                            : null;
 
-            HistoricoStatusOS historico = funcionario != null
-                    ? HistoricoStatusOS.porFuncionario(atualizada.getId(), statusAnterior, novoStatus,
-                            comando.observacao(), funcionario)
-                    : HistoricoStatusOS.porSistema(atualizada.getId(), statusAnterior, novoStatus,
-                            comando.observacao());
-            historicoRepositorio.salvar(historico);
+                            HistoricoStatusOS historico =
+                                    funcionario != null
+                                            ? HistoricoStatusOS.porFuncionario(
+                                                    atualizada.getId(),
+                                                    statusAnterior,
+                                                    novoStatus,
+                                                    comando.observacao(),
+                                                    funcionario)
+                                            : HistoricoStatusOS.porSistema(
+                                                    atualizada.getId(),
+                                                    statusAnterior,
+                                                    novoStatus,
+                                                    comando.observacao());
+                            historicoRepositorio.salvar(historico);
 
-            return recarregarView(atualizada.getId());
-        });
+                            return recarregarView(atualizada.getId());
+                        });
 
         // Fora da transação de propósito: a notificação é consequência da mudança já confirmada.
         // Notificar dentro do commit faria uma indisponibilidade do servidor de e-mail reverter
@@ -174,20 +205,27 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
      * Avisa o cliente da mudança de status, quando ele aceita notificações e tem e-mail.
      *
      * <p>O contrato da port proíbe a implementação de lançar; o try/catch aqui é a segunda
-     * barreira, cobrindo também a leitura do cliente — nenhuma delas pode transformar um avanço
-     * de status bem-sucedido em erro para quem chamou a API.
+     * barreira, cobrindo também a leitura do cliente — nenhuma delas pode transformar um avanço de
+     * status bem-sucedido em erro para quem chamou a API.
      */
-    private void notificarCliente(OrdemServicoView view, StatusOS statusAnterior, String observacao) {
+    private void notificarCliente(
+            OrdemServicoView view, StatusOS statusAnterior, String observacao) {
         try {
             Cliente cliente = clienteRepositorio.porId(view.clienteId()).orElse(null);
-            if (cliente == null || !cliente.isAceitaNotificacoes()
-                    || cliente.getEmail() == null || cliente.getEmail().isBlank()) {
+            if (cliente == null
+                    || !cliente.isAceitaNotificacoes()
+                    || cliente.getEmail() == null
+                    || cliente.getEmail().isBlank()) {
                 return;
             }
-            notificador.notificarMudancaDeStatus(new NotificadorDeStatusOS.MudancaDeStatus(
-                    view.numero(),
-                    statusAnterior != null ? statusAnterior.name() : null,
-                    view.status(), cliente.getNome(), cliente.getEmail(), observacao));
+            notificador.notificarMudancaDeStatus(
+                    new NotificadorDeStatusOS.MudancaDeStatus(
+                            view.numero(),
+                            statusAnterior != null ? statusAnterior.name() : null,
+                            view.status(),
+                            cliente.getNome(),
+                            cliente.getEmail(),
+                            observacao));
         } catch (RuntimeException e) {
             // Silenciar é intencional: ver javadoc de NotificadorDeStatusOS.
         }
@@ -195,30 +233,37 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
     @Override
     public OrdemServicoView registrarDiagnostico(UUID id, String diagnostico) {
-        return transacao.executar(() -> {
-            OrdemServico os = buscar(id);
-            os.registrarDiagnostico(diagnostico);
-            OrdemServico salva = ordemServicoRepositorio.salvar(os);
-            return recarregarView(salva.getId());
-        });
+        return transacao.executar(
+                () -> {
+                    OrdemServico os = buscar(id);
+                    os.registrarDiagnostico(diagnostico);
+                    OrdemServico salva = ordemServicoRepositorio.salvar(os);
+                    return recarregarView(salva.getId());
+                });
     }
 
     @Override
     public OrdemServicoView atribuirMecanico(UUID id, UUID mecanicoId) {
-        return transacao.executar(() -> {
-            OrdemServico os = buscar(id);
+        return transacao.executar(
+                () -> {
+                    OrdemServico os = buscar(id);
 
-            Funcionario funcionario = funcionarioRepositorio.porId(mecanicoId)
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Mecânico não encontrado com ID: " + mecanicoId));
-            if (!(funcionario instanceof Mecanico)) {
-                throw new BusinessException("O funcionário informado não é um mecânico.");
-            }
+                    Funcionario funcionario =
+                            funcionarioRepositorio
+                                    .porId(mecanicoId)
+                                    .orElseThrow(
+                                            () ->
+                                                    new ResourceNotFoundException(
+                                                            "Mecânico não encontrado com ID: "
+                                                                    + mecanicoId));
+                    if (!(funcionario instanceof Mecanico)) {
+                        throw new BusinessException("O funcionário informado não é um mecânico.");
+                    }
 
-            os.atribuirMecanico(mecanicoId);
-            OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
-            return recarregarView(atualizada.getId());
-        });
+                    os.atribuirMecanico(mecanicoId);
+                    OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
+                    return recarregarView(atualizada.getId());
+                });
     }
 
     /**
@@ -232,28 +277,44 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
             return;
         }
         for (Abrir.ItemServico item : itens) {
-            Servico servico = servicoRepositorio.porId(item.servicoId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Serviço não encontrado com ID: " + item.servicoId()));
-            os.adicionarItemServico(ItemServicoOS.criar(servico.getId(),
-                    quantidadeOuPadrao(item.quantidade()), servico.getPrecoBase()));
+            Servico servico =
+                    servicoRepositorio
+                            .porId(item.servicoId())
+                            .orElseThrow(
+                                    () ->
+                                            new ResourceNotFoundException(
+                                                    "Serviço não encontrado com ID: "
+                                                            + item.servicoId()));
+            os.adicionarItemServico(
+                    ItemServicoOS.criar(
+                            servico.getId(),
+                            quantidadeOuPadrao(item.quantidade()),
+                            servico.getPrecoBase()));
         }
     }
 
     /**
-     * Lança na OS as peças previstas na recepção. Não há baixa de estoque aqui — ver o javadoc
-     * de {@link Abrir}.
+     * Lança na OS as peças previstas na recepção. Não há baixa de estoque aqui — ver o javadoc de
+     * {@link Abrir}.
      */
     private void adicionarItensDePeca(OrdemServico os, List<Abrir.ItemPeca> itens) {
         if (itens == null) {
             return;
         }
         for (Abrir.ItemPeca item : itens) {
-            Peca peca = pecaRepositorio.porId(item.pecaId())
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Peça não encontrada com ID: " + item.pecaId()));
-            os.adicionarItemPeca(ItemPecaOS.criar(peca.getId(),
-                    quantidadeOuPadrao(item.quantidade()), peca.getPrecoVenda()));
+            Peca peca =
+                    pecaRepositorio
+                            .porId(item.pecaId())
+                            .orElseThrow(
+                                    () ->
+                                            new ResourceNotFoundException(
+                                                    "Peça não encontrada com ID: "
+                                                            + item.pecaId()));
+            os.adicionarItemPeca(
+                    ItemPecaOS.criar(
+                            peca.getId(),
+                            quantidadeOuPadrao(item.quantidade()),
+                            peca.getPrecoVenda()));
         }
     }
 
@@ -262,16 +323,30 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
     }
 
     private OrdemServico buscar(UUID id) {
-        return ordemServicoRepositorio.porId(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Ordem de serviço não encontrada com ID: " + id));
+        return ordemServicoRepositorio
+                .porId(id)
+                .orElseThrow(
+                        () ->
+                                new ResourceNotFoundException(
+                                        "Ordem de serviço não encontrada com ID: " + id));
     }
 
-    private Optional<Atendente> atendentePorEmail(String email) {
-        if (email == null) {
+    private Optional<Funcionario> funcionarioPorSubject(String subject) {
+        if (subject == null || subject.isBlank()) return Optional.empty();
+        try {
+            return funcionarioRepositorio
+                    .porId(UUID.fromString(subject))
+                    .filter(Funcionario::isAtivo);
+        } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
-        return funcionarioRepositorio.porEmail(email)
+    }
+
+    private Optional<Atendente> atendentePorId(String subject) {
+        if (subject == null) {
+            return Optional.empty();
+        }
+        return funcionarioPorSubject(subject)
                 .filter(Atendente.class::isInstance)
                 .map(Atendente.class::cast);
     }
@@ -286,8 +361,11 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
     /** Relê a projeção para devolver a view já com nome do cliente e placa do veículo. */
     private OrdemServicoView recarregarView(UUID id) {
-        return consultaOrdemServico.porId(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Ordem de serviço não encontrada com ID: " + id));
+        return consultaOrdemServico
+                .porId(id)
+                .orElseThrow(
+                        () ->
+                                new ResourceNotFoundException(
+                                        "Ordem de serviço não encontrada com ID: " + id));
     }
 }

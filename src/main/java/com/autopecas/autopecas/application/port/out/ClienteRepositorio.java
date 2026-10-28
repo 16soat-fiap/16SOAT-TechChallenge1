@@ -13,8 +13,8 @@ import java.util.UUID;
 /**
  * Port de saída do agregado Cliente.
  *
- * <p>Concentra em uma única port o que antes eram três interfaces Spring Data
- * (Cliente, ClientePF e ClientePJ) — a polimorfia PF/PJ agora vive no domínio.
+ * <p>Concentra em uma única port o que antes eram três interfaces Spring Data (Cliente, ClientePF e
+ * ClientePJ) — a polimorfia PF/PJ agora vive no domínio.
  */
 public interface ClienteRepositorio {
 
@@ -23,10 +23,7 @@ public interface ClienteRepositorio {
 
     Optional<Cliente> porId(UUID id);
 
-    /**
-     * Busca o cliente ativo pelo e-mail, usado para ligar o usuário autenticado no Keycloak ao
-     * seu cadastro. A coluna é UNIQUE, então no máximo um cliente responde por e-mail.
-     */
+    /** Busca por e-mail de contato; autenticacao e propriedade usam o UUID de sub. */
     Optional<Cliente> porEmail(String email);
 
     boolean existePorId(UUID id);

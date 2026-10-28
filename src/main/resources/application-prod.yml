@@ -26,38 +26,13 @@ spring:
     enabled: true
     baseline-on-migrate: false
     validate-on-migrate: true
-    locations: classpath:db/migration,classpath:db/demo
+    locations: classpath:db/migration
 
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          jwk-set-uri: ${OAUTH2_JWK_URI:${KEYCLOAK_ISSUER_URI}/protocol/openid-connect/certs}
-          issuer-uri: ${OAUTH2_ISSUER_URI:${KEYCLOAK_ISSUER_URI}}
-
-# ─────────────────────────────────────────────────────────────
-# Propriedades customizadas do Keycloak (usadas no código)
-# ─────────────────────────────────────────────────────────────
-keycloak:
-  # Nome do client configurado no Keycloak (usado pelo KeycloakJwtAuthConverter
-  # para extrair roles de resource_access.<client-id>.roles)
-  client-id: ${KEYCLOAK_CLIENT_ID:autopecas-api}
-
-  # URL base do Keycloak (usada apenas para documentação/health)
-  auth-server-url: ${KEYCLOAK_AUTH_SERVER_URL:http://localhost:9080}
-  realm: ${KEYCLOAK_REALM:autopecas}
-
-# ─────────────────────────────────────────────────────────────
-# Swagger — configuração do SecurityScheme para testar com JWT
-# ─────────────────────────────────────────────────────────────
 springdoc:
   api-docs:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
-    oauth:
-      client-id: autopecas-swagger
-      realm: autopecas
 
 server:
   port: 8080

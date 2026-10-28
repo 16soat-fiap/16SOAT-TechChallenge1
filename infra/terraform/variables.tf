@@ -33,11 +33,6 @@ variable "app_host_port" {
   default     = 8080
 }
 
-variable "keycloak_host_port" {
-  description = "Porta da máquina host mapeada para o NodePort 30081 (Keycloak)."
-  type        = number
-  default     = 9080
-}
 
 variable "postgres_image" {
   description = "Imagem do PostgreSQL."
@@ -82,11 +77,6 @@ variable "app_database" {
   default     = "app_db"
 }
 
-variable "keycloak_database" {
-  description = "Banco do Keycloak, separado do banco da aplicação."
-  type        = string
-  default     = "keycloak_db"
-}
 
 variable "kubeconfig_path_override" {
   description = <<-EOT

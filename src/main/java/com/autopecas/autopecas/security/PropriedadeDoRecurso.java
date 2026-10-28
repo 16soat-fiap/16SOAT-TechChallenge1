@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.security;
 
 import com.autopecas.autopecas.application.port.in.ControleDeAcessoDoCliente;
+
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Component;
 
@@ -10,7 +11,8 @@ import java.util.UUID;
  * Ponte entre as expressões @PreAuthorize e a port de controle de acesso.
  *
  * <p>Registrado com o nome curto "propriedade" para que as anotações fiquem legíveis:
- * {@code @PreAuthorize("hasAnyRole('ADMIN','ATENDENTE') or @propriedade.ehOProprioCliente(authentication, #id)")}.
+ * {@code @PreAuthorize("hasAnyRole('ADMIN','ATENDENTE')
+ * or @propriedade.ehOProprioCliente(authentication, #id)")}.
  *
  * <p>A única responsabilidade daqui é extrair o identificador do usuário do Authentication e
  * delegar. A regra de quem é dono de quê vive na aplicação; o Spring Security não a conhece.
@@ -25,23 +27,28 @@ public class PropriedadeDoRecurso {
     }
 
     public boolean ehOProprioCliente(Authentication authentication, UUID clienteId) {
-        return controleDeAcesso.ehOProprioCliente(emailDe(authentication), clienteId);
+        return controleDeAcesso.ehOProprioCliente(clienteSubject(authentication), clienteId);
     }
 
     public boolean ehDonoDoVeiculo(Authentication authentication, UUID veiculoId) {
-        return controleDeAcesso.ehDonoDoVeiculo(emailDe(authentication), veiculoId);
+        return controleDeAcesso.ehDonoDoVeiculo(clienteSubject(authentication), veiculoId);
     }
 
     public boolean ehDonoDaOrdemServico(Authentication authentication, UUID ordemServicoId) {
-        return controleDeAcesso.ehDonoDaOrdemServico(emailDe(authentication), ordemServicoId);
+        return controleDeAcesso.ehDonoDaOrdemServico(
+                clienteSubject(authentication), ordemServicoId);
     }
 
     public boolean ehDonoDaOrdemServicoPorNumero(Authentication authentication, String numero) {
-        return controleDeAcesso.ehDonoDaOrdemServicoPorNumero(emailDe(authentication), numero);
+        return controleDeAcesso.ehDonoDaOrdemServicoPorNumero(
+                clienteSubject(authentication), numero);
     }
 
-    /** O nome do principal é o e-mail do token — ver {@link KeycloakJwtAuthConverter}. */
-    private String emailDe(Authentication authentication) {
-        return authentication != null ? authentication.getName() : null;
+    private String clienteSubject(Authentication authentication) {
+        if (authentication == null
+                || !authentication.isAuthenticated()
+                || authentication.getAuthorities().stream()
+                        .noneMatch(a -> a.getAuthority().equals("ROLE_CLIENTE"))) return null;
+        return authentication.getName();
     }
 }

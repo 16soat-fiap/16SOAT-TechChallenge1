@@ -38,12 +38,6 @@ resource "kind_cluster" "autopecas" {
         protocol       = "TCP"
       }
 
-      # Keycloak → http://localhost:9080
-      extra_port_mappings {
-        container_port = 30081
-        host_port      = var.keycloak_host_port
-        protocol       = "TCP"
-      }
     }
 
     # Um bloco `node` por worker. O provider kind não aceita `for_each` dentro

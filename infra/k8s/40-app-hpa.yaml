@@ -43,7 +43,6 @@ spec:
 
   minReplicas: 2
   # Teto dimensionado para cluster local: cada réplica é uma JVM de ~420Mi, e
-  # 6 delas junto com Keycloak e Postgres já saturam uma máquina de
   # desenvolvimento. Em cluster real, com nós dedicados, este número sobe.
   maxReplicas: 5
 

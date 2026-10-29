@@ -12,6 +12,13 @@ WORKDIR /build
 COPY pom.xml .
 RUN mvn -B -q dependency:go-offline
 
+# Agente do New Relic, na mesma versão da API declarada no pom (newrelic.version).
+# Vem do Maven Central pelo próprio Maven, que confere o checksum do artefato.
+# Camada logo após o pom: só é refeita quando a versão muda.
+RUN mvn -B -q dependency:copy \
+      -Dartifact=com.newrelic.agent.java:newrelic-agent:$(mvn -B -q help:evaluate -Dexpression=newrelic.version -DforceStdout) \
+      -DoutputDirectory=/newrelic -Dmdep.stripVersion=true
+
 COPY src ./src
 RUN mvn -B -q clean package -DskipTests
 
@@ -57,6 +64,10 @@ COPY --from=layers --chown=appuser:appuser /layers/extracted/spring-boot-loader/
 COPY --from=layers --chown=appuser:appuser /layers/extracted/snapshot-dependencies/ ./
 COPY --from=layers --chown=appuser:appuser /layers/extracted/application/ ./
 
+# O agente procura o newrelic.yml no diretório do próprio jar.
+COPY --from=build /newrelic/newrelic-agent.jar /app/newrelic/newrelic.jar
+COPY infra/docker/newrelic.yml /app/newrelic/newrelic.yml
+
 USER appuser
 
 EXPOSE 8080
@@ -70,7 +81,10 @@ ENV SPRING_PROFILES_ACTIVE=prod \
 #   e degradado: o orquestrador reinicia o pod, que é o comportamento desejado.
 # -Duser.timezone=UTC alinha o @CreationTimestamp do Hibernate (que usa o fuso da
 #   JVM) com o Relogio da aplicação e com a serialização Jackson.
+# -javaagent só entra quando NEW_RELIC_LICENSE_KEY existe: no Compose e em dev a
+#   imagem sobe sem o agente, em vez de subir com ele reclamando da key ausente.
 ENTRYPOINT ["sh", "-c", "exec java \
+  ${NEW_RELIC_LICENSE_KEY:+-javaagent:/app/newrelic/newrelic.jar} \
   -XX:+UseContainerSupport \
   -XX:MaxRAMPercentage=75.0 \
   -XX:+ExitOnOutOfMemoryError \

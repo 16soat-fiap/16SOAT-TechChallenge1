@@ -21,6 +21,9 @@
 #   Secrets do repositório — credenciais da sessão do Learner Lab, que expiram
 #   em ~4h e precisam ser atualizadas a cada sessão (o Lab não permite OIDC):
 #     AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY · AWS_SESSION_TOKEN
+#   e, opcional, a do monitoramento:
+#     NEW_RELIC_LICENSE_KEY  liga o agente do New Relic nos pods (sem ela, o
+#                            deploy segue sem monitoramento)
 #
 #   Secrets de CADA ambiente (Settings → Environments → homologacao/producao),
 #   porque cada ambiente tem o seu banco:
@@ -77,6 +80,7 @@ jobs:
       APP_DB_PASSWORD: ${{ secrets.APP_DB_PASSWORD }}
       DB_ADMIN_USERNAME: ${{ secrets.DB_ADMIN_USERNAME }}
       DB_ADMIN_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
       PULAR_TESTES: ${{ inputs.pular_testes && 'sim' || 'nao' }}
 
     steps:

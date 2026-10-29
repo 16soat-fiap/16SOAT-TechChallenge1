@@ -27,6 +27,9 @@
 #   APP_DB_PASSWORD     senha do `autopecas_app`, com que a aplicação roda
 #   DB_ADMIN_USERNAME   dono do banco, usado SÓ pelo Job de migração
 #   DB_ADMIN_PASSWORD
+#   NEW_RELIC_LICENSE_KEY  opcional: liga o agente do New Relic (APM, traces,
+#                          logs e eventos de negócio). Sem ela, a aplicação
+#                          sobe igual, sem monitoramento.
 #
 # Viram Secrets do Kubernetes por entrada padrão (stdin), nunca por argumento
 # de linha de comando — que apareceria na lista de processos e no histórico.
@@ -233,6 +236,11 @@ data:
   # As migrações são do Job, com o dono do banco; o usuário da aplicação não
   # tem DDL para executá-las.
   SPRING_FLYWAY_ENABLED: "false"
+  # Observabilidade: o ambiente vai nos logs (ECS) e nos eventos de negócio, e
+  # cada ambiente é uma aplicação separada no New Relic.
+  AMBIENTE: "${AMBIENTE}"
+  NEW_RELIC_APP_NAME: "autopecas-api-${AMBIENTE}"
+  NEW_RELIC_LABELS: "ambiente:${AMBIENTE}"
 ---
 apiVersion: v1
 kind: Secret
@@ -245,8 +253,14 @@ type: Opaque
 data:
   DB_USERNAME: $(b64 "$APP_DB_USERNAME")
   DB_PASSWORD: $(b64 "$APP_DB_PASSWORD")
+$( [ -n "${NEW_RELIC_LICENSE_KEY:-}" ] && printf '  NEW_RELIC_LICENSE_KEY: %s\n' "$(b64 "$NEW_RELIC_LICENSE_KEY")" )
 EOF
 ok "ConfigMap e Secret da aplicação aplicados"
+if [ -n "${NEW_RELIC_LICENSE_KEY:-}" ]; then
+  ok "New Relic ligado — aplicação autopecas-api-${AMBIENTE}"
+else
+  aviso "NEW_RELIC_LICENSE_KEY não definida: a aplicação sobe sem o agente do New Relic."
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Migração, com o dono do banco

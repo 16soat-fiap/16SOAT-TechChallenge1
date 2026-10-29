@@ -14,6 +14,7 @@ import com.autopecas.autopecas.application.port.out.OrdemServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.PecaRepositorio;
 import com.autopecas.autopecas.application.port.out.Relogio;
 import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
+import com.autopecas.autopecas.application.port.out.Telemetria;
 import com.autopecas.autopecas.application.port.out.Transacao;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.domain.enums.StatusOS;
@@ -30,10 +31,13 @@ import com.autopecas.autopecas.domain.model.os.ItemPecaOS;
 import com.autopecas.autopecas.domain.model.os.ItemServicoOS;
 import com.autopecas.autopecas.domain.model.os.OrdemServico;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Casos de uso do agregado OrdemServico.
@@ -56,6 +60,7 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
     private final ServicoRepositorio servicoRepositorio;
     private final PecaRepositorio pecaRepositorio;
     private final NotificadorDeStatusOS notificador;
+    private final Telemetria telemetria;
     private final GeradorNumeroOS geradorNumeroOS;
     private final Relogio relogio;
     private final Transacao transacao;
@@ -70,12 +75,14 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
             ServicoRepositorio servicoRepositorio,
             PecaRepositorio pecaRepositorio,
             NotificadorDeStatusOS notificador,
+            Telemetria telemetria,
             GeradorNumeroOS geradorNumeroOS,
             Relogio relogio,
             Transacao transacao) {
         this.servicoRepositorio = servicoRepositorio;
         this.pecaRepositorio = pecaRepositorio;
         this.notificador = notificador;
+        this.telemetria = telemetria;
         this.ordemServicoRepositorio = ordemServicoRepositorio;
         this.consultaOrdemServico = consultaOrdemServico;
         this.clienteRepositorio = clienteRepositorio;
@@ -106,6 +113,59 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
 
     @Override
     public OrdemServicoView abrir(Abrir comando) {
+        OrdemServicoView aberta = registrandoFalha("abrir", () -> abrirNaTransacao(comando));
+        // Depois do commit: só conta a OS que de fato passou a existir.
+        semPropagar(() -> telemetria.osAberta(aberta.numero()));
+        return aberta;
+    }
+
+    @Override
+    public OrdemServicoView avancarStatus(UUID id, AvancarStatus comando) {
+        return registrandoFalha("avancar_status", () -> executarAvanco(id, comando));
+    }
+
+    @Override
+    public OrdemServicoView registrarDiagnostico(UUID id, String diagnostico) {
+        return registrandoFalha(
+                "registrar_diagnostico", () -> registrarDiagnosticoNaTransacao(id, diagnostico));
+    }
+
+    @Override
+    public OrdemServicoView atribuirMecanico(UUID id, UUID mecanicoId) {
+        return registrandoFalha(
+                "atribuir_mecanico", () -> atribuirMecanicoNaTransacao(id, mecanicoId));
+    }
+
+    /**
+     * Executa a operação e, se ela falhar, conta a falha antes de devolvê-la a quem chamou.
+     *
+     * <p>Regra de negócio recusando o pedido (transição inválida, OS inexistente) é separada de
+     * erro inesperado: só o segundo indica processamento quebrado e deve acordar alguém.
+     */
+    private <T> T registrandoFalha(String operacao, Supplier<T> acao) {
+        try {
+            return acao.get();
+        } catch (RuntimeException e) {
+            boolean regraDeNegocio =
+                    e instanceof BusinessException || e instanceof ResourceNotFoundException;
+            semPropagar(() -> telemetria.falhaNoProcessamentoDeOS(operacao, regraDeNegocio, e));
+            throw e;
+        }
+    }
+
+    /**
+     * Segunda barreira do contrato de {@link Telemetria}: mesmo uma implementação que lance não
+     * pode transformar uma operação bem-sucedida em erro, nem trocar o erro original por outro.
+     */
+    private void semPropagar(Runnable registro) {
+        try {
+            registro.run();
+        } catch (RuntimeException e) {
+            // Silenciar é intencional: ver javadoc de Telemetria.
+        }
+    }
+
+    private OrdemServicoView abrirNaTransacao(Abrir comando) {
         return transacao.executar(
                 () -> {
                     if (!clienteRepositorio.existePorId(comando.clienteId())) {
@@ -152,13 +212,13 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
                 });
     }
 
-    @Override
-    public OrdemServicoView avancarStatus(UUID id, AvancarStatus comando) {
+    private OrdemServicoView executarAvanco(UUID id, AvancarStatus comando) {
         StatusOS novoStatus = converterStatus(comando.novoStatus());
 
         // Guarda o status de origem para compor a notificação, sem precisar de um tipo novo
         // neste pacote — onde toda classe é, por regra de arquitetura, um caso de uso.
         AtomicReference<StatusOS> statusDeOrigem = new AtomicReference<>();
+        AtomicReference<Long> segundosNoStatusDeOrigem = new AtomicReference<>();
 
         OrdemServicoView viewAtualizada =
                 transacao.executar(
@@ -166,6 +226,9 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
                             OrdemServico os = buscar(id);
                             StatusOS statusAnterior = os.getStatus();
                             statusDeOrigem.set(statusAnterior);
+                            // Lido antes de gravar a transição nova: o último registro é o da
+                            // entrada no status que a OS está deixando agora.
+                            segundosNoStatusDeOrigem.set(segundosDesdeUltimaTransicao(os.getId()));
 
                             os.avancarStatus(novoStatus, relogio.agora());
                             OrdemServico atualizada = ordemServicoRepositorio.salvar(os);
@@ -198,7 +261,31 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
         // Notificar dentro do commit faria uma indisponibilidade do servidor de e-mail reverter
         // um avanço de status que a oficina já executou no mundo real.
         notificarCliente(viewAtualizada, statusDeOrigem.get(), comando.observacao());
+        semPropagar(
+                () ->
+                        telemetria.statusAlterado(
+                                new Telemetria.TransicaoDeStatus(
+                                        viewAtualizada.numero(),
+                                        statusDeOrigem.get().name(),
+                                        novoStatus.name(),
+                                        segundosNoStatusDeOrigem.get())));
         return viewAtualizada;
+    }
+
+    /**
+     * Quanto tempo a OS passou no status atual, medido desde a última transição registrada.
+     * Nulo quando o histórico ainda não tem registro (dados anteriores ao histórico).
+     */
+    private Long segundosDesdeUltimaTransicao(UUID osId) {
+        List<HistoricoStatusOS> historico = historicoRepositorio.daOrdemServico(osId);
+        if (historico.isEmpty()) {
+            return null;
+        }
+        LocalDateTime entradaNoStatus = historico.getLast().getCriadoEm();
+        if (entradaNoStatus == null) {
+            return null;
+        }
+        return Duration.between(entradaNoStatus, relogio.agora()).toSeconds();
     }
 
     /**
@@ -231,8 +318,7 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
         }
     }
 
-    @Override
-    public OrdemServicoView registrarDiagnostico(UUID id, String diagnostico) {
+    private OrdemServicoView registrarDiagnosticoNaTransacao(UUID id, String diagnostico) {
         return transacao.executar(
                 () -> {
                     OrdemServico os = buscar(id);
@@ -242,8 +328,7 @@ public class GestaoDeOrdensServicoUseCase implements GestaoDeOrdensServico {
                 });
     }
 
-    @Override
-    public OrdemServicoView atribuirMecanico(UUID id, UUID mecanicoId) {
+    private OrdemServicoView atribuirMecanicoNaTransacao(UUID id, UUID mecanicoId) {
         return transacao.executar(
                 () -> {
                     OrdemServico os = buscar(id);

@@ -1,0 +1,14 @@
+# O state guarda os IDs de tudo que foi criado no New Relic. Fica no bucket S3,
+# nunca no repositório.
+*.tfstate
+*.tfstate.*
+.terraform/
+crash.log
+
+# Gerados por infra/scripts/observabilidade.sh: trazem o bucket da conta AWS e o
+# e-mail de alerta de quem aplicou.
+backend.hcl
+terraform.tfvars
+
+# O .terraform.lock.hcl é versionado de propósito, como nas stacks do
+# autopecas-infra-k8s: fixa a versão e os hashes do provider testado.

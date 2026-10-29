@@ -1,6 +1,7 @@
 package com.autopecas.autopecas.adapter.out.notification;
 
 import com.autopecas.autopecas.application.port.out.NotificadorDeStatusOS;
+import com.autopecas.autopecas.application.port.out.Telemetria;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -26,12 +27,15 @@ public class NotificadorDeStatusPorEmail implements NotificadorDeStatusOS {
     private static final Logger log = LoggerFactory.getLogger(NotificadorDeStatusPorEmail.class);
 
     private final ObjectProvider<JavaMailSender> mailSender;
+    private final Telemetria telemetria;
 
     @Value("${notificacoes.email.remetente:nao-responda@autopecas.local}")
     private String remetente;
 
-    public NotificadorDeStatusPorEmail(ObjectProvider<JavaMailSender> mailSender) {
+    public NotificadorDeStatusPorEmail(ObjectProvider<JavaMailSender> mailSender,
+                                       Telemetria telemetria) {
         this.mailSender = mailSender;
+        this.telemetria = telemetria;
     }
 
     @Override
@@ -56,6 +60,9 @@ public class NotificadorDeStatusPorEmail implements NotificadorDeStatusOS {
             // A OS já avançou; o e-mail é consequência, não condição.
             log.warn("Falha ao notificar o cliente da OS {} — o status permanece atualizado",
                     mudanca.numeroOS(), e);
+            // Silenciosa para quem chamou, mas não para a operação: entra no painel de erros
+            // de integração.
+            telemetria.falhaDeIntegracao("email", "notificar_mudanca_de_status", e);
         }
     }
 

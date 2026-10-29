@@ -136,9 +136,12 @@ _rodar_no_container() {
     args+=(-v "${HOME}/.aws/login:/root/.aws/login")
   fi
 
+  # NEW_RELIC_API_KEY: o provider do New Relic (infra/newrelic) a lê do ambiente.
+  # Repassada pelo nome, como as da AWS: o valor não entra na linha de comando.
   local nome_var
   for nome_var in AWS_PROFILE AWS_REGION AWS_DEFAULT_REGION \
-                  AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN; do
+                  AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN \
+                  NEW_RELIC_API_KEY; do
     if [ -n "${!nome_var:-}" ]; then
       args+=(-e "$nome_var")
     fi
@@ -192,6 +195,7 @@ ferramenta() {
   fi
 }
 
+tf()       { ferramenta terraform "$@"; }
 awscli()   { ferramenta aws "$@"; }
 kubectl_() { ferramenta kubectl "$@"; }
 

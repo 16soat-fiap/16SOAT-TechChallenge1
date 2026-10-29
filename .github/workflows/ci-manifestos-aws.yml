@@ -7,6 +7,9 @@
 # IMAGE_URI) que o deploy substitui — `nodePort: NODE_PORT` não é YAML válido
 # para o Kubernetes. Por isso a validação renderiza primeiro, com os valores
 # reais de cada ambiente, exatamente como o infra/scripts/deploy.sh faz.
+#
+# Também valida a stack do New Relic (infra/newrelic): formatação, tipos e
+# referências, sem tocar na conta.
 # =============================================================================
 name: CI - Manifestos AWS
 
@@ -15,12 +18,14 @@ on:
     paths:
       - 'infra/k8s/aws/**'
       - 'infra/scripts/**'
+      - 'infra/newrelic/**'
       - '.github/workflows/ci-manifestos-aws.yml'
   push:
     branches: [main, homologacao]
     paths:
       - 'infra/k8s/aws/**'
       - 'infra/scripts/**'
+      - 'infra/newrelic/**'
       - '.github/workflows/ci-manifestos-aws.yml'
 
 permissions:
@@ -83,3 +88,31 @@ jobs:
             bash -n "$f"
             echo "ok  $f"
           done
+
+  newrelic:
+    name: Terraform do New Relic
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/newrelic
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.10.5'
+
+      - name: Formatação
+        run: terraform fmt -check -recursive -diff
+
+      - name: Init
+        # -backend=false: baixa o provider sem o bucket de state nem credencial.
+        run: terraform init -backend=false -input=false
+
+      - name: Validate
+        # O provider exige uma API key para validar a configuração, mas não a
+        # usa: nenhuma chamada à conta acontece no validate.
+        env:
+          NEW_RELIC_API_KEY: NRAK-validacao-sem-conta
+        run: terraform validate

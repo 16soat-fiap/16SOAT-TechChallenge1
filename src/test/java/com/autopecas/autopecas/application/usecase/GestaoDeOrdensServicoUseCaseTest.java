@@ -3,6 +3,9 @@ package com.autopecas.autopecas.application.usecase;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -22,6 +25,7 @@ import com.autopecas.autopecas.application.port.out.NotificadorDeStatusOS;
 import com.autopecas.autopecas.application.port.out.OrdemServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.PecaRepositorio;
 import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
+import com.autopecas.autopecas.application.port.out.Telemetria;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.domain.enums.StatusOS;
 import com.autopecas.autopecas.domain.exception.BusinessException;
@@ -72,6 +76,7 @@ class GestaoDeOrdensServicoUseCaseTest {
     @Mock private ServicoRepositorio servicoRepositorio;
     @Mock private PecaRepositorio pecaRepositorio;
     @Mock private NotificadorDeStatusOS notificador;
+    @Mock private Telemetria telemetria;
 
     private GestaoDeOrdensServico gestao;
 
@@ -88,6 +93,7 @@ class GestaoDeOrdensServicoUseCaseTest {
                         servicoRepositorio,
                         pecaRepositorio,
                         notificador,
+                        telemetria,
                         new GeradorNumeroOSFixo(),
                         new RelogioFixo(),
                         new TransacaoDireta());
@@ -598,6 +604,146 @@ class GestaoDeOrdensServicoUseCaseTest {
             assertThat(resultado).isNotNull();
             assertThat(os.getStatus()).isEqualTo(StatusOS.EM_DIAGNOSTICO);
             verify(ordemServicoRepositorio).salvar(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Telemetria")
+    class TelemetriaDeNegocio {
+
+        private void avancoValido() {
+            OrdemServico os = osNoStatus(StatusOS.RECEBIDA);
+            when(ordemServicoRepositorio.porId(OS_ID)).thenReturn(Optional.of(os));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(os);
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+        }
+
+        @Test
+        @DisplayName("deve contar a OS aberta depois de confirmada")
+        void deveContarOsAberta() {
+            when(clienteRepositorio.existePorId(CLIENTE_ID)).thenReturn(true);
+            when(veiculoRepositorio.porIdAtivo(VEICULO_ID)).thenReturn(Optional.of(veiculo()));
+            when(ordemServicoRepositorio.salvar(any())).thenReturn(osNoStatus(StatusOS.RECEBIDA));
+            when(consultaOrdemServico.porId(OS_ID)).thenReturn(Optional.of(view()));
+
+            gestao.abrir(
+                    new GestaoDeOrdensServico.Abrir(
+                            CLIENTE_ID, VEICULO_ID, "Barulho", null, null, null, null, null));
+
+            verify(telemetria).osAberta("OS-000001");
+        }
+
+        @Test
+        @DisplayName("deve publicar a transição com o tempo desde a entrada no status anterior")
+        void devePublicarTransicaoComTempoNoStatus() {
+            avancoValido();
+            // Entrou em RECEBIDA 90 segundos antes do instante do relógio fixo.
+            when(historicoRepositorio.daOrdemServico(OS_ID))
+                    .thenReturn(
+                            List.of(
+                                    HistoricoStatusOS.reconstituir(
+                                            1L,
+                                            OS_ID,
+                                            null,
+                                            StatusOS.RECEBIDA,
+                                            null,
+                                            "SISTEMA",
+                                            null,
+                                            RelogioFixo.INSTANTE.minusSeconds(90))));
+
+            gestao.avancarStatus(
+                    OS_ID, new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            ArgumentCaptor<Telemetria.TransicaoDeStatus> transicao =
+                    ArgumentCaptor.forClass(Telemetria.TransicaoDeStatus.class);
+            verify(telemetria).statusAlterado(transicao.capture());
+            assertThat(transicao.getValue().numeroOS()).isEqualTo("OS-000001");
+            assertThat(transicao.getValue().statusAnterior()).isEqualTo("RECEBIDA");
+            assertThat(transicao.getValue().statusNovo()).isEqualTo("EM_DIAGNOSTICO");
+            assertThat(transicao.getValue().segundosNoAnterior()).isEqualTo(90L);
+        }
+
+        @Test
+        @DisplayName("sem histórico anterior o tempo no status fica nulo")
+        void semHistoricoTempoNulo() {
+            avancoValido();
+
+            gestao.avancarStatus(
+                    OS_ID, new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            ArgumentCaptor<Telemetria.TransicaoDeStatus> transicao =
+                    ArgumentCaptor.forClass(Telemetria.TransicaoDeStatus.class);
+            verify(telemetria).statusAlterado(transicao.capture());
+            assertThat(transicao.getValue().segundosNoAnterior()).isNull();
+        }
+
+        @Test
+        @DisplayName("transição recusada conta como regra de negócio e o erro segue para quem chamou")
+        void transicaoRecusadaContaComoRegraDeNegocio() {
+            when(ordemServicoRepositorio.porId(OS_ID))
+                    .thenReturn(Optional.of(osNoStatus(StatusOS.RECEBIDA)));
+
+            assertThatThrownBy(
+                            () ->
+                                    gestao.avancarStatus(
+                                            OS_ID,
+                                            new GestaoDeOrdensServico.AvancarStatus(
+                                                    "ENTREGUE", null, null)))
+                    .isInstanceOf(BusinessException.class);
+
+            verify(telemetria)
+                    .falhaNoProcessamentoDeOS(
+                            eq("avancar_status"),
+                            eq(true),
+                            any(BusinessException.class));
+            verify(telemetria, never()).statusAlterado(any());
+        }
+
+        @Test
+        @DisplayName("erro inesperado conta como falha de processamento, não como regra")
+        void erroInesperadoNaoEhRegraDeNegocio() {
+            IllegalStateException quedaDoBanco = new IllegalStateException("banco fora do ar");
+            when(ordemServicoRepositorio.porId(OS_ID)).thenThrow(quedaDoBanco);
+
+            assertThatThrownBy(() -> gestao.registrarDiagnostico(OS_ID, "qualquer"))
+                    .isSameAs(quedaDoBanco);
+
+            verify(telemetria).falhaNoProcessamentoDeOS("registrar_diagnostico", false, quedaDoBanco);
+        }
+
+        @Test
+        @DisplayName("telemetria quebrada não desfaz o avanço de status")
+        void telemetriaQuebradaNaoQuebraOAvanco() {
+            avancoValido();
+            doThrow(new IllegalStateException("New Relic fora do ar"))
+                    .when(telemetria)
+                    .statusAlterado(any());
+
+            OrdemServicoView resultado =
+                    gestao.avancarStatus(
+                            OS_ID,
+                            new GestaoDeOrdensServico.AvancarStatus("EM_DIAGNOSTICO", null, null));
+
+            assertThat(resultado).isNotNull();
+            verify(telemetria, never()).falhaNoProcessamentoDeOS(any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("telemetria quebrada não troca o erro original da operação")
+        void telemetriaQuebradaNaoTrocaOErro() {
+            when(ordemServicoRepositorio.porId(OS_ID))
+                    .thenReturn(Optional.of(osNoStatus(StatusOS.RECEBIDA)));
+            doThrow(new IllegalStateException("New Relic fora do ar"))
+                    .when(telemetria)
+                    .falhaNoProcessamentoDeOS(any(), anyBoolean(), any());
+
+            assertThatThrownBy(
+                            () ->
+                                    gestao.avancarStatus(
+                                            OS_ID,
+                                            new GestaoDeOrdensServico.AvancarStatus(
+                                                    "ENTREGUE", null, null)))
+                    .isInstanceOf(BusinessException.class);
         }
     }
 

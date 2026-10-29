@@ -1,0 +1,57 @@
+# =============================================================================
+# Configuração do agente Java do New Relic, copiada para /app/newrelic na imagem.
+#
+# O que muda por ambiente NÃO está aqui — vem por variável de ambiente, que tem
+# precedência sobre este arquivo:
+#
+#   NEW_RELIC_LICENSE_KEY   Secret autopecas-secrets (deploy.sh)
+#   NEW_RELIC_APP_NAME      autopecas-api-homologacao / autopecas-api-producao
+#   NEW_RELIC_LABELS        ambiente:<ambiente>
+#
+# Sem NEW_RELIC_LICENSE_KEY o Dockerfile nem carrega o agente.
+# =============================================================================
+common: &default_settings
+  app_name: autopecas-api
+  license_key: ''
+
+  # Log do próprio agente no stdout do container, junto com o da aplicação: o
+  # sistema de arquivos do pod é somente-leitura.
+  log_file_name: STDOUT
+  log_level: info
+
+  distributed_tracing:
+    enabled: true
+
+  # Logs no New Relic ligados ao trace (trace.id/span.id) sem agente de log à
+  # parte: o próprio agente encaminha o que passa pelo Logback. O context_data
+  # leva junto o MDC — é assim que o correlationId chega ao New Relic.
+  application_logging:
+    enabled: true
+    forwarding:
+      enabled: true
+      context_data:
+        enabled: true
+    metrics:
+      enabled: true
+    # O log do stdout já é JSON (ECS); decorar a linha a quebraria.
+    local_decorating:
+      enabled: false
+
+  # Eventos de negócio da TelemetriaNewRelic (OrdemServicoAberta, ...).
+  custom_insights_events:
+    enabled: true
+
+  # 4xx é resposta correta a pedido errado (validação, regra de negócio, acesso
+  # negado), não falha do serviço. Contá-los poluiria a taxa de erro do APM; as
+  # recusas de regra de negócio continuam visíveis no evento FalhaProcessamentoOS.
+  error_collector:
+    enabled: true
+    ignore_status_codes: 400-499
+
+  # API JSON, sem páginas HTML: não há onde injetar o script de browser.
+  # (As probes do Kubernetes saem do APM pelo IgnorarProbesNoApmFilter.)
+  browser_monitoring:
+    auto_instrument: false
+
+production:
+  <<: *default_settings

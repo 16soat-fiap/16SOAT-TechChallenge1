@@ -1,0 +1,99 @@
+# =============================================================================
+# Horizontal Pod Autoscaler da API no EKS.
+#
+# Os alvos e a `behavior` são os mesmos do ambiente kind, porque vieram de
+# medição e a medição não muda por trocar de nuvem. O que muda é o TETO.
+#
+# ─── Por que HPA_MIN/HPA_MAX por ambiente ────────────────────────────────────
+# O limite é o node group: até 4 nós t3.medium, com ~2,7 GiB alocáveis para
+# workload em cada, e 768 MiB por réplica → ~3 réplicas por nó, ~12 no total.
+#
+# Homologação e produção dividem esse mesmo cluster, então dividem também essa
+# capacidade. O deploy substitui os marcadores:
+#
+#   producao      HPA_MIN=2  HPA_MAX=8
+#   homologacao   HPA_MIN=1  HPA_MAX=3
+#
+# 11 no máximo, somados, abaixo das ~12. Com 10 em cada, como era com um
+# ambiente só, os dois juntos pediriam 20: as réplicas excedentes ficariam
+# Pending para sempre, e o autoscaler pareceria quebrado.
+#
+# Os números conversam com `node_max_size` do repositório autopecas-infra-k8s:
+# subir um sem o outro não aumenta a capacidade real.
+#
+# ─── CPU comanda; memória é grade de proteção ────────────────────────────────
+# Medição deste projeto, com carga real:
+#
+#   CPU     ocioso   2%   → sob carga 194%   (reage à demanda)
+#   Memória ociosa 419Mi  → sob carga 421Mi  (praticamente constante)
+#
+# A memória de uma JVM não acompanha a carga, e não CONVERGE como sinal de
+# autoscaling: acrescentar réplicas não reduz a memória por pod, porque cada
+# réplica nova carrega o próprio heap. Se o alvo ficasse abaixo do consumo em
+# regime permanente, o HPA subiria até maxReplicas e nunca voltaria.
+#
+# Daí o alvo de memória em 85%, bem acima do patamar normal (~55% com request de
+# 768Mi): só dispara em pressão real — vazamento, carga anômala. Quem modula a
+# frota é a CPU.
+#
+# Verificar com:  kubectl get hpa -n producao -w   (ou -n homologacao)
+# TARGETS em <unknown> significa metrics-server ausente ou ainda sem coleta.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: autopecas-api
+  namespace: NAMESPACE
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: autopecas-api
+
+  minReplicas: HPA_MIN
+  maxReplicas: HPA_MAX
+
+  metrics:
+    # 70% deixa espaço para absorver um pico enquanto os pods novos sobem — o
+    # startup da JVM não é instantâneo, e aqui pode haver um nó novo a esperar
+    # (~2 min) antes de o pod nem começar. Mirar em 90% chegaria tarde.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Grade de proteção, não motor de escalonamento — ver o comentário no topo.
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 85
+
+  behavior:
+    scaleUp:
+      # Reage à subida sem dobrar a frota de uma vez: 2 pods a cada 60s dá tempo
+      # de a JVM nova entrar em serviço e a métrica refletir o alívio, evitando
+      # escalar além do necessário — o que no EKS significa gastar além do
+      # necessário, porque pode arrastar um nó novo.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      # Desce devagar: 5 minutos de janela evitam o vai-e-vem de réplicas quando
+      # a carga oscila, e cada pod novo custa o startup da JVM. Combina com o
+      # `scale-down-unneeded-time=5m` do Cluster Autoscaler — primeiro saem os
+      # pods, depois o nó que ficou vazio.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

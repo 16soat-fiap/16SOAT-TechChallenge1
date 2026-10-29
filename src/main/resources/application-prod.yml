@@ -65,3 +65,17 @@ logging:
   level:
     org.springframework.security: INFO
     com.autopecas: INFO
+  # Uma linha JSON por evento (Elastic Common Schema), com o MDC — onde está o correlationId
+  # da requisição — e os campos de negócio de cada log. É o formato que o New Relic e o
+  # `kubectl logs | jq` leem sem expressão regular.
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        environment: ${AMBIENTE:local}
+
+# Atributo `ambiente` dos eventos de negócio enviados ao New Relic (TelemetriaNewRelic):
+# homologação e produção dividem a conta, e os dashboards filtram por ele.
+observabilidade:
+  ambiente: ${AMBIENTE:local}

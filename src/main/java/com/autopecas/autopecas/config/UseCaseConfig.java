@@ -23,6 +23,7 @@ import com.autopecas.autopecas.application.port.out.OrdemServicoRepositorio;
 import com.autopecas.autopecas.application.port.out.PecaRepositorio;
 import com.autopecas.autopecas.application.port.out.Relogio;
 import com.autopecas.autopecas.application.port.out.ServicoRepositorio;
+import com.autopecas.autopecas.application.port.out.Telemetria;
 import com.autopecas.autopecas.application.port.out.Transacao;
 import com.autopecas.autopecas.application.port.out.VeiculoRepositorio;
 import com.autopecas.autopecas.application.usecase.ConsultaDeIndicadoresUseCase;
@@ -99,12 +100,14 @@ public class UseCaseConfig {
             ServicoRepositorio servicoRepositorio,
             PecaRepositorio pecaRepositorio,
             NotificadorDeStatusOS notificador,
+            Telemetria telemetria,
             GeradorNumeroOS geradorNumeroOS,
             Relogio relogio,
             Transacao transacao) {
         return new GestaoDeOrdensServicoUseCase(ordemServicoRepositorio, consultaOrdemServico,
                 clienteRepositorio, veiculoRepositorio, funcionarioRepositorio, historicoRepositorio,
-                servicoRepositorio, pecaRepositorio, notificador, geradorNumeroOS, relogio, transacao);
+                servicoRepositorio, pecaRepositorio, notificador, telemetria, geradorNumeroOS,
+                relogio, transacao);
     }
 
     @Bean

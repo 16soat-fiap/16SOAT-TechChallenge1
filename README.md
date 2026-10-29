@@ -12,17 +12,19 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 - [Arquitetura e Design](#-arquitetura-e-design)
 - [Estrutura do Projeto](#-estrutura-do-projeto)
 - [Modelo de Domínio](#-modelo-de-domínio)
-- [Segurança e Controle de Acesso](#-segurança-e-controle-de-acesso)
+- [Segurança e autenticação](#segurança-e-autenticação)
 - [Endpoints da API](#-endpoints-da-api)
-- [Infraestrutura e Execução](#-infraestrutura-e-execução)
-  - [Pré-requisitos](#pré-requisitos)
-  - [Containerização (Docker)](#containerização-docker)
-  - [Provisionamento (Terraform)](#provisionamento-terraform)
-  - [Orquestração (Kubernetes)](#orquestração-kubernetes)
-  - [Passo a passo completo](#passo-a-passo-completo)
-  - [Autoscaling](#autoscaling-como-verificar)
-  - [Segredos em produção](#segredos-em-produção)
-  - [Operação e diagnóstico](#operação-e-diagnóstico)
+- [Infraestrutura e execução](#infraestrutura-e-execução)
+  - [Docker Compose](#docker-compose)
+  - [Kubernetes local](#kubernetes-local)
+- [Deploy na AWS (Fase 3)](#️-deploy-na-aws-fase-3)
+  - [Ambientes](#ambientes)
+  - [Como o deploy funciona](#como-o-deploy-funciona)
+  - [Deploy automático](#deploy-automático)
+- [Monitoramento (New Relic)](#-monitoramento-new-relic)
+  - [O que é coletado e de onde](#o-que-é-coletado-e-de-onde)
+  - [Dashboards e alertas](#dashboards-e-alertas)
+  - [Como ligar](#como-ligar)
 - [CI/CD Local (Self-hosted Runner)](#-cicd-local-self-hosted-runner)
   - [Como funciona o pipeline](#como-funciona-o-pipeline)
   - [Pré-requisitos da máquina](#pré-requisitos-da-máquina)
@@ -34,7 +36,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Verificar o runner no GitHub](#verificar-o-runner-no-github)
 - [Testes e Cobertura](#-testes-e-cobertura)
 - [Análise de Qualidade (SonarQube)](#-análise-de-qualidade-sonarqube)
-- [Variáveis de Ambiente](#-variáveis-de-ambiente)
+- [Variáveis de ambiente](#variaveis-de-ambiente)
 - [Diagramas](#-diagramas)
 
 ---
@@ -163,7 +165,7 @@ src/test/java/com/autopecas/autopecas/
 └── integration/                     # Testcontainers + PostgreSQL real (schema via Flyway)
 ```
 
-Infraestrutura (detalhada na seção [Infraestrutura e Execução](#-infraestrutura-e-execução)):
+Infraestrutura (detalhada nas seções [Infraestrutura e execução](#infraestrutura-e-execução) e [Deploy na AWS](#️-deploy-na-aws-fase-3)):
 
 ```
 Dockerfile                           # build em 3 estágios, JAR em camadas
@@ -464,6 +466,223 @@ Kubernetes e banco gerenciado. A preparacao local não altera esses recursos.
 A pipeline de deploy e responsabilidade de outro integrante; veja o handoff
 em docs/autenticacao-lambda.md antes de executar a pipeline antiga.
 
+## ☁️ Deploy na AWS (Fase 3)
+
+A aplicação roda num cluster **Amazon EKS** atrás de um **API Gateway**, com
+autenticação por CPF numa **Lambda** e banco **RDS PostgreSQL**. A
+infraestrutura está dividida em quatro repositórios, e este cuida só da
+aplicação e do deploy dela:
+
+| Repositório | Responsabilidade |
+|---|---|
+| [`autopecas-lambda-auth`](https://github.com/16soat-fiap/autopecas-lambda-auth) | Lambda de login por CPF/CNPJ (emite o JWT) e o API Gateway |
+| [`autopecas-infra-k8s`](https://github.com/16soat-fiap/autopecas-infra-k8s) | Rede, cluster EKS com autoscaling, NLB interno, VPC Link, ECR |
+| [`autopecas-infra-db-teste`](https://github.com/16soat-fiap/autopecas-infra-db-teste) | RDS PostgreSQL por ambiente e usuários restritos |
+| **`16SOAT-TechChallenge1`** (este) | Aplicação, manifestos do EKS e deploy |
+
+```mermaid
+flowchart LR
+  C[Cliente] --> G[API Gateway]
+  G -->|POST /auth CPF| L[Lambda] --> DB[(RDS)]
+  G -->|/api/* com JWT válido| VL[VPC Link] --> NLB[NLB interno]
+  NLB -->|NodePort 30080 produção<br/>30081 homologação| P[Pods da API<br/>namespace por ambiente]
+  P -->|autopecas_app, sem DDL| DB
+  J[Job de migração<br/>dono do banco] -.antes de cada deploy.-> DB
+```
+
+### Ambientes
+
+Homologação e produção compartilham o mesmo cluster, cada um no seu namespace,
+com o seu banco, o seu stage no API Gateway e o seu NodePort:
+
+| | Branch | Namespace | NodePort | Réplicas (HPA) |
+|---|---|---|---|---|
+| Homologação | `homologacao` | `homologacao` | 30081 | 1 a 3 |
+| Produção | `main` | `producao` | 30080 | 2 a 8 |
+
+As faixas de réplicas somadas (11) cabem na capacidade dos 4 nós do cluster
+(~12 réplicas): os dois ambientes dividem a mesma frota.
+
+### Como o deploy funciona
+
+`infra/scripts/deploy.sh` — o mesmo script no pipeline e na mão:
+
+1. **Lê as saídas dos outros repositórios** direto do bucket de state
+   compartilhado (`autopecas-tfstate-<id-da-conta>`): ECR e cluster, `db_url`
+   do banco do ambiente, emissor e chaves do JWT da Lambda. Nenhum valor de
+   conta fica no código.
+2. **Testa, constrói e publica** a imagem no ECR, com a tag do commit.
+3. **Cria o namespace, o ConfigMap e os Secrets** do ambiente. As senhas
+   chegam por variável de ambiente e viram Secret por entrada padrão, nunca por
+   argumento de linha de comando.
+4. **Roda as migrações num Job**, com o dono do banco: um container inicial
+   copia os scripts do Flyway de dentro da própria imagem, e o Flyway oficial
+   os aplica. Se a migração falhar, o deploy para **antes** de trocar a
+   aplicação. A credencial do dono do banco é apagada do cluster ao final.
+5. **Sobe a aplicação** como `autopecas_app`, que não tem DDL, com o Flyway
+   desligado, e espera o rollout.
+
+```bash
+export APP_DB_PASSWORD=...                   # senha do autopecas_app
+export DB_ADMIN_USERNAME=... DB_ADMIN_PASSWORD=...  # dono do banco, só para migrar
+
+AMBIENTE=homologacao ./infra/scripts/deploy.sh
+AMBIENTE=homologacao SMOKE_DOCUMENTO=<CPF de um cliente ativo> ./infra/scripts/smoke.sh
+```
+
+Pré-requisitos: Docker, bash e uma credencial da AWS (no Learner Lab, a da
+sessão). AWS CLI e kubectl vêm da imagem `infra/docker/toolbox.Dockerfile`
+quando não estão instalados.
+
+**Primeiro deploy de cada banco.** As permissões do `autopecas_app` e do
+`lambda_auth` são dadas tabela por tabela, então só podem ser concedidas depois
+que as migrações criam as tabelas:
+
+1. `SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh`: publica a imagem e roda
+   só as migrações.
+2. O administrador roda os scripts `criar-usuario-*.sql` e o
+   `verificar-permissoes.sql` do repositório do banco.
+3. `PULAR_MIGRACAO=sim ./infra/scripts/deploy.sh`: sobe a aplicação.
+
+Nos deploys seguintes basta o comando do bloco acima. Se uma migração nova
+criar tabela ou sequence, a lista do `permissoes-aplicacao.sql` precisa ser
+atualizada e reaplicada antes do deploy.
+
+O `smoke.sh` verifica o caminho inteiro em quatro casos: a chave pública do
+emissor responde, uma rota protegida sem token é barrada no gateway (401), o
+login por CPF devolve um token que a API aceita, e um token adulterado é
+recusado.
+
+### Deploy automático
+
+| Workflow | Quando | O que faz |
+|---|---|---|
+| `ci-manifestos-aws.yml` | PR e push | Renderiza os manifestos dos dois ambientes e valida com kubeconform; confere a sintaxe dos scripts; valida o Terraform do New Relic |
+| `cd-aws.yml` | push em `homologacao` ou `main` | `deploy.sh` + `smoke.sh` no ambiente da branch |
+
+Para ligar o CD (Settings → Secrets and variables → Actions):
+
+- variável `AWS_CD_HABILITADO` = `true`;
+- secrets do repositório `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e
+  `AWS_SESSION_TOKEN`, da sessão do Learner Lab — expiram em ~4h e precisam
+  ser atualizados a cada sessão, porque o Lab não permite OIDC;
+- secret do repositório `NEW_RELIC_LICENSE_KEY`, opcional: liga o monitoramento
+  nos pods (ver [Monitoramento](#-monitoramento-new-relic));
+- em cada ambiente (Settings → Environments → `homologacao` / `producao`):
+  `APP_DB_PASSWORD`, `DB_ADMIN_USERNAME`, `DB_ADMIN_PASSWORD` e, opcional,
+  `SMOKE_DOCUMENTO`.
+
+Sem `AWS_CD_HABILITADO`, o workflow é ignorado em vez de falhar.
+
+## 📊 Monitoramento (New Relic)
+
+Cada requisito de monitoramento do projeto e onde ele é atendido:
+
+| Requisito | Como |
+|---|---|
+| Latência das APIs | Agente Java do New Relic na imagem (APM): p50/p95/p99 por endpoint |
+| CPU e memória do Kubernetes | Integração do New Relic com o cluster (chart `nri-bundle`, no repositório `autopecas-infra-k8s`) |
+| Healthchecks e uptime | Monitor sintético no `/actuator/health`, pelo API Gateway, a cada 5 minutos, de duas regiões |
+| Alertas de falha no processamento de OS | Evento `FalhaProcessamentoOS` + condição de alerta por e-mail |
+| Logs estruturados (JSON) com correlação | Logs em ECS JSON, com `correlationId` por requisição; no New Relic, cada linha vem ligada ao trace (`trace.id`) |
+| Volume diário de OS | Evento `OrdemServicoAberta` |
+| Tempo médio por status | Evento `OrdemServicoStatusAlterado`, com o tempo que a OS passou no status de origem |
+| Erros nas integrações | Evento `FalhaIntegracao` (e-mail), erros da aplicação e chamadas externas com erro (banco, JWKS) |
+
+### O que é coletado e de onde
+
+```mermaid
+flowchart LR
+  subgraph EKS
+    P[Pods da API<br/>agente Java] 
+    K[nri-bundle<br/>DaemonSet + kube-state-metrics]
+  end
+  S[Monitor sintético] -->|GET /actuator/health| G[API Gateway] --> P
+  P -->|traces, métricas, logs,<br/>eventos de negócio| NR[(New Relic)]
+  K -->|CPU, memória, HPA,<br/>nós, eventos| NR
+  S --> NR
+  NR -->|alertas| E[E-mail]
+```
+
+**Eventos de negócio.** A aplicação declara os fatos numa porta de saída
+(`application/port/out/Telemetria`); o adapter `TelemetriaNewRelic` os publica
+como eventos consultáveis por NRQL. O caso de uso não conhece o New Relic, e
+sem o agente na JVM (testes, Compose) as chamadas são no-op.
+
+| Evento | Quando | Atributos |
+|---|---|---|
+| `OrdemServicoAberta` | OS confirmada no banco | `numeroOS`, `ambiente` |
+| `OrdemServicoStatusAlterado` | Cada troca de status | `statusAnterior`, `statusNovo`, `segundosNoStatusAnterior` |
+| `FalhaProcessamentoOS` | Abrir, avançar status, diagnosticar ou atribuir mecânico falhou | `operacao`, `regraDeNegocio` (recusa esperada × erro inesperado), `erro`, `mensagem` |
+| `FalhaIntegracao` | O e-mail ao cliente não saiu (a OS avança mesmo assim) | `integracao`, `operacao`, `erro` |
+
+**Logs.** No perfil `prod`, cada linha é um JSON (Elastic Common Schema) com o
+`correlationId` da requisição — recebido no cabeçalho `X-Correlation-Id` ou
+gerado, e devolvido na resposta — e os campos de negócio do evento. O agente
+encaminha os logs ao New Relic já com `trace.id` e `span.id`: de um erro no
+dashboard se chega ao trace da requisição e às outras linhas dela.
+
+As probes do Kubernetes (`/actuator/**`) ficam fora do APM: a cada poucos
+segundos em cada pod, elas dominariam o throughput e puxariam a latência média
+para baixo. Respostas 4xx não contam como erro — são a API recusando um pedido
+inválido.
+
+### Dashboards e alertas
+
+Criados por Terraform em `infra/newrelic`, um dashboard por ambiente
+(`Autopecas - homologacao`, `Autopecas - producao`):
+
+| Página | Mostra |
+|---|---|
+| Ordens de serviço | OS abertas hoje, volume diário (30 dias), tempo médio em diagnóstico, execução e finalização, últimas transições |
+| API | Latência p50/p95/p99, requisições por minuto e por status HTTP, endpoints mais lentos, disponibilidade do healthcheck |
+| Kubernetes | CPU e memória por pod, réplicas do HPA (atuais × desejadas × máximo), nós do cluster, reinícios, eventos |
+| Erros e integrações | Falhas de integração, falhas de processamento por operação, chamadas externas com erro, erros por tipo |
+| Logs | Erros e avisos com `trace.id` e `correlationId`, volume por nível |
+
+Alertas (política `autopecas`, por e-mail):
+
+| Condição | Dispara quando |
+|---|---|
+| Falha no processamento de OS | Qualquer erro **inesperado** numa operação de OS (regra de negócio recusando não conta) |
+| Latência p95 | Acima de 2 s por 5 minutos |
+| Respostas 5xx | Acima de 5% por 5 minutos |
+| Falha de integração | E-mail ao cliente não enviado (aviso) |
+| Healthcheck | Duas checagens seguidas sem `"status":"UP"` |
+
+### Como ligar
+
+São duas keys diferentes, e nenhuma vai para arquivo versionado:
+
+- **License key** (`...NRAL`): só **envia** dados. Vai para os pods e para o
+  cluster, sempre como Secret do Kubernetes criado por entrada padrão.
+- **User API key** (`NRAK-...`): **administra** a conta. Só o Terraform de
+  `infra/newrelic` usa, e o provider a lê da variável de ambiente.
+
+```bash
+export NEW_RELIC_LICENSE_KEY=...    # license key
+export NEW_RELIC_API_KEY=NRAK-...   # User API key
+
+# 1. Cluster: integração com o Kubernetes (repositório autopecas-infra-k8s)
+./scripts/up.sh
+
+# 2. Aplicação: o deploy liga o agente quando a license key está definida
+AMBIENTE=homologacao ./infra/scripts/deploy.sh
+
+# 3. Dashboards, alertas e monitor — rodar de novo a cada subida do ambiente,
+#    porque o gateway do Learner Lab muda de URL
+NEW_RELIC_ACCOUNT_ID=<id da conta> NEW_RELIC_EMAIL_ALERTAS=<e-mail> \
+  ./infra/scripts/observabilidade.sh
+```
+
+Sem `NEW_RELIC_LICENSE_KEY` tudo funciona como antes, sem monitoramento: a
+imagem nem carrega o agente.
+
+O monitor de disponibilidade depende de o gateway expor `GET /actuator/health`
+sem autenticação, encaminhado à aplicação pela VPC Link — configuração do
+repositório `autopecas-lambda-auth`. A aplicação já libera essa rota sem token
+e responde só `{"status":"UP"}` ou `DOWN`, sem detalhes.
+
 ## 🔄 CI/CD Local (Self-hosted Runner)
 
 O pipeline de CI/CD está definido em `.github/workflows/ci-cd-local.yml` e é composto por três
@@ -711,6 +930,9 @@ Aguarde `BUILD SUCCESS` e acesse o dashboard em `http://localhost:9000`.
 | JWT_JWKS_URI | URL pública de /.well-known/jwks.json |
 | JWT_AUDIENCE | Audience esperada; padrão autopecas-api |
 | SPRING_PROFILES_ACTIVE | dev ou prod |
+| AMBIENTE | homologacao, producao ou local; vai nos logs e nos eventos do New Relic |
+| NEW_RELIC_LICENSE_KEY | Opcional: liga o agente do New Relic (sem ela, a imagem sobe sem o agente) |
+| NEW_RELIC_APP_NAME | Nome da aplicação no New Relic; o deploy usa autopecas-api-&lt;ambiente&gt; |
 
 Os testes usam chaves efemeras e endpoints ficticios, sem acessar a AWS.
 Não há senha padrão de funcionário nem administrador nas migrations.

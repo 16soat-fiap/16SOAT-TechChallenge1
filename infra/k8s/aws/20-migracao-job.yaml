@@ -1,0 +1,118 @@
+# =============================================================================
+# Migrações do banco, antes de cada deploy da aplicação.
+#
+# Por que um Job separado, e não o Flyway na subida da aplicação (como no
+# ambiente kind): o banco gerenciado (repositório autopecas-infra-db) separa as
+# identidades. A aplicação roda como `autopecas_app`, que só lê e escreve nas
+# tabelas de negócio e NÃO tem DDL — um bug ou uma injeção na aplicação não
+# consegue apagar ou alterar o schema. Quem cria e altera tabelas é o dono do
+# banco, e só aqui, com a credencial do Secret `autopecas-migracao`.
+#
+# Como funciona:
+#
+#   1. o initContainer roda a PRÓPRIA imagem da aplicação, só para copiar os
+#      scripts de migração que vêm dentro dela (BOOT-INF/classes/db/migration).
+#      Assim a migração aplicada é exatamente a da versão que vai subir;
+#   2. o container principal é o Flyway oficial, que aplica os scripts e
+#      termina. Subir a aplicação inteira só para migrar arriscaria o Job nunca
+#      terminar, se alguma thread mantivesse a JVM viva.
+#
+# Mesma configuração do Flyway da aplicação em produção: validação ligada, sem
+# baseline automático (um banco inesperado deve falhar, não ser "adotado").
+#
+# Marcadores substituídos pelo deploy: NAMESPACE e IMAGE_URI.
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: autopecas-migracao
+  namespace: NAMESPACE
+  labels:
+    app.kubernetes.io/name: autopecas-migracao
+    app.kubernetes.io/part-of: autopecas
+spec:
+  # Migração que falhou não deve ser repetida às cegas: o erro precisa ser lido.
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  # Some do cluster 1h depois de terminar; o deploy apaga o anterior antes de
+  # criar o novo, então o histórico não acumula.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autopecas-migracao
+        app.kubernetes.io/part-of: autopecas
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: migracoes
+          emptyDir: {}
+      initContainers:
+        - name: copiar-migracoes
+          image: IMAGE_URI
+          command: ["sh", "-c", "cp -r /app/BOOT-INF/classes/db/migration/. /migracoes/ && ls /migracoes"]
+          volumeMounts:
+            - name: migracoes
+              mountPath: /migracoes
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: flyway
+          # Mesma linha (11.x) do Flyway embutido na aplicação, e a versão usada
+          # pelo repositório do banco para preparar o ambiente de homologação.
+          image: flyway/flyway:11.14.1
+          args: ["migrate"]
+          env:
+            - name: FLYWAY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: autopecas-config
+                  key: DB_URL
+            - name: FLYWAY_USER
+              valueFrom:
+                secretKeyRef:
+                  name: autopecas-migracao
+                  key: FLYWAY_USER
+            - name: FLYWAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: autopecas-migracao
+                  key: FLYWAY_PASSWORD
+            - name: FLYWAY_LOCATIONS
+              value: filesystem:/flyway/sql
+            - name: FLYWAY_BASELINE_ON_MIGRATE
+              value: "false"
+            - name: FLYWAY_VALIDATE_ON_MIGRATE
+              value: "true"
+            - name: FLYWAY_CONNECT_RETRIES
+              value: "10"
+          volumeMounts:
+            - name: migracoes
+              mountPath: /flyway/sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

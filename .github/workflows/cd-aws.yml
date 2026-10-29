@@ -1,0 +1,115 @@
+# =============================================================================
+# CD — publica a imagem no ECR e faz o deploy no EKS.
+#
+#   push em `homologacao` → namespace homologacao   (ambiente GitHub "homologacao")
+#   push em `main`        → namespace producao      (ambiente GitHub "producao")
+#
+# O workflow só chama infra/scripts/deploy.sh e infra/scripts/smoke.sh — os
+# mesmos que rodam na mão. Pipeline e deploy manual são o MESMO código, então
+# um não diverge do outro.
+#
+# ─── O que precisa existir na AWS ────────────────────────────────────────────
+#
+# Os repositórios autopecas-infra-k8s (cluster e ECR), autopecas-infra-db
+# (banco do ambiente) e autopecas-lambda-auth (emissor do JWT), aplicados na
+# mesma conta. O deploy lê as saídas deles do bucket de state.
+#
+# ─── Configuração no GitHub (Settings → Secrets and variables → Actions) ─────
+#
+#   Variable  AWS_CD_HABILITADO = true      liga o workflow
+#
+#   Secrets do repositório — credenciais da sessão do Learner Lab, que expiram
+#   em ~4h e precisam ser atualizadas a cada sessão (o Lab não permite OIDC):
+#     AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY · AWS_SESSION_TOKEN
+#   e, opcional, a do monitoramento:
+#     NEW_RELIC_LICENSE_KEY  liga o agente do New Relic nos pods (sem ela, o
+#                            deploy segue sem monitoramento)
+#
+#   Secrets de CADA ambiente (Settings → Environments → homologacao/producao),
+#   porque cada ambiente tem o seu banco:
+#     APP_DB_PASSWORD      senha do usuário autopecas_app
+#     DB_ADMIN_USERNAME    dono do banco, só para o Job de migração
+#     DB_ADMIN_PASSWORD
+#     SMOKE_DOCUMENTO      opcional: CPF de um cliente ativo, para o smoke test
+#
+# Sem AWS_CD_HABILITADO, o job é ignorado em vez de falhar: sem os secrets,
+# todo push terminaria em vermelho — e um fork nunca os terá.
+# =============================================================================
+name: CD - Deploy AWS
+
+on:
+  push:
+    branches: [main, homologacao]
+    paths:
+      - 'src/**'
+      - 'pom.xml'
+      - 'Dockerfile'
+      - 'infra/k8s/aws/**'
+      - 'infra/scripts/**'
+      - '.github/workflows/cd-aws.yml'
+  workflow_dispatch:
+    inputs:
+      pular_testes:
+        description: 'Pular os testes (só para redeploy de código já testado)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Um deploy por ambiente de cada vez, e nunca cancelado no meio: abortar um
+# rollout deixaria o Deployment em estado misto.
+concurrency:
+  group: cd-aws-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy (${{ github.ref_name == 'main' && 'producao' || 'homologacao' }})
+    if: vars.AWS_CD_HABILITADO == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'producao' || 'homologacao' }}
+    timeout-minutes: 45
+
+    env:
+      AMBIENTE: ${{ github.ref_name == 'main' && 'producao' || 'homologacao' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      APP_DB_PASSWORD: ${{ secrets.APP_DB_PASSWORD }}
+      DB_ADMIN_USERNAME: ${{ secrets.DB_ADMIN_USERNAME }}
+      DB_ADMIN_PASSWORD: ${{ secrets.DB_ADMIN_PASSWORD }}
+      NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+      PULAR_TESTES: ${{ inputs.pular_testes && 'sim' || 'nao' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Permissão no Maven Wrapper
+        run: chmod +x mvnw
+
+      - name: Conferir a sessão do Learner Lab
+        # Falhar aqui, com uma mensagem clara, é melhor que falhar no meio do
+        # deploy com um "ExpiredToken".
+        run: |
+          if ! aws sts get-caller-identity --query Arn --output text; then
+            echo "::error::Credencial inválida ou expirada. Inicie uma sessão no Learner Lab e atualize AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN."
+            exit 1
+          fi
+
+      - name: Deploy
+        # O runner já traz Docker, AWS CLI, kubectl e jq: os scripts usam os
+        # binários locais e não constroem a imagem toolbox.
+        run: bash infra/scripts/deploy.sh
+
+      - name: Smoke test
+        env:
+          SMOKE_DOCUMENTO: ${{ secrets.SMOKE_DOCUMENTO }}
+        run: bash infra/scripts/smoke.sh

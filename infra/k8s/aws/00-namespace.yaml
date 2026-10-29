@@ -1,0 +1,21 @@
+# =============================================================================
+# Namespace de um ambiente da aplicação no EKS.
+#
+# `NAMESPACE` é substituído pelo deploy (infra/scripts/deploy.sh) por
+# `homologacao` ou `producao`: os dois ambientes compartilham o mesmo cluster
+# (repositório autopecas-infra-k8s) e se separam aqui, cada um com o seu
+# ConfigMap, os seus Secrets, o seu banco e o seu NodePort.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: NAMESPACE
+  labels:
+    app.kubernetes.io/part-of: autopecas
+    autopecas.io/ambiente: NAMESPACE
+    # A API e o Job de migração satisfazem `restricted`. `baseline` em enforce
+    # e `restricted` em audit/warn mantém os avisos visíveis sem bloquear um
+    # pod de diagnóstico (kubectl debug) numa emergência.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

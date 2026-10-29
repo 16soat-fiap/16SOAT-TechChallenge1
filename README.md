@@ -21,6 +21,10 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Ambientes](#ambientes)
   - [Como o deploy funciona](#como-o-deploy-funciona)
   - [Deploy automático](#deploy-automático)
+- [Monitoramento (New Relic)](#-monitoramento-new-relic)
+  - [O que é coletado e de onde](#o-que-é-coletado-e-de-onde)
+  - [Dashboards e alertas](#dashboards-e-alertas)
+  - [Como ligar](#como-ligar)
 - [CI/CD Local (Self-hosted Runner)](#-cicd-local-self-hosted-runner)
   - [Como funciona o pipeline](#como-funciona-o-pipeline)
   - [Pré-requisitos da máquina](#pré-requisitos-da-máquina)
@@ -553,7 +557,7 @@ recusado.
 
 | Workflow | Quando | O que faz |
 |---|---|---|
-| `ci-manifestos-aws.yml` | PR e push | Renderiza os manifestos dos dois ambientes e valida com kubeconform; confere a sintaxe dos scripts |
+| `ci-manifestos-aws.yml` | PR e push | Renderiza os manifestos dos dois ambientes e valida com kubeconform; confere a sintaxe dos scripts; valida o Terraform do New Relic |
 | `cd-aws.yml` | push em `homologacao` ou `main` | `deploy.sh` + `smoke.sh` no ambiente da branch |
 
 Para ligar o CD (Settings → Secrets and variables → Actions):
@@ -562,11 +566,122 @@ Para ligar o CD (Settings → Secrets and variables → Actions):
 - secrets do repositório `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e
   `AWS_SESSION_TOKEN`, da sessão do Learner Lab — expiram em ~4h e precisam
   ser atualizados a cada sessão, porque o Lab não permite OIDC;
+- secret do repositório `NEW_RELIC_LICENSE_KEY`, opcional: liga o monitoramento
+  nos pods (ver [Monitoramento](#-monitoramento-new-relic));
 - em cada ambiente (Settings → Environments → `homologacao` / `producao`):
   `APP_DB_PASSWORD`, `DB_ADMIN_USERNAME`, `DB_ADMIN_PASSWORD` e, opcional,
   `SMOKE_DOCUMENTO`.
 
 Sem `AWS_CD_HABILITADO`, o workflow é ignorado em vez de falhar.
+
+## 📊 Monitoramento (New Relic)
+
+Cada requisito de monitoramento do projeto e onde ele é atendido:
+
+| Requisito | Como |
+|---|---|
+| Latência das APIs | Agente Java do New Relic na imagem (APM): p50/p95/p99 por endpoint |
+| CPU e memória do Kubernetes | Integração do New Relic com o cluster (chart `nri-bundle`, no repositório `autopecas-infra-k8s`) |
+| Healthchecks e uptime | Monitor sintético no `/actuator/health`, pelo API Gateway, a cada 5 minutos, de duas regiões |
+| Alertas de falha no processamento de OS | Evento `FalhaProcessamentoOS` + condição de alerta por e-mail |
+| Logs estruturados (JSON) com correlação | Logs em ECS JSON, com `correlationId` por requisição; no New Relic, cada linha vem ligada ao trace (`trace.id`) |
+| Volume diário de OS | Evento `OrdemServicoAberta` |
+| Tempo médio por status | Evento `OrdemServicoStatusAlterado`, com o tempo que a OS passou no status de origem |
+| Erros nas integrações | Evento `FalhaIntegracao` (e-mail), erros da aplicação e chamadas externas com erro (banco, JWKS) |
+
+### O que é coletado e de onde
+
+```mermaid
+flowchart LR
+  subgraph EKS
+    P[Pods da API<br/>agente Java] 
+    K[nri-bundle<br/>DaemonSet + kube-state-metrics]
+  end
+  S[Monitor sintético] -->|GET /actuator/health| G[API Gateway] --> P
+  P -->|traces, métricas, logs,<br/>eventos de negócio| NR[(New Relic)]
+  K -->|CPU, memória, HPA,<br/>nós, eventos| NR
+  S --> NR
+  NR -->|alertas| E[E-mail]
+```
+
+**Eventos de negócio.** A aplicação declara os fatos numa porta de saída
+(`application/port/out/Telemetria`); o adapter `TelemetriaNewRelic` os publica
+como eventos consultáveis por NRQL. O caso de uso não conhece o New Relic, e
+sem o agente na JVM (testes, Compose) as chamadas são no-op.
+
+| Evento | Quando | Atributos |
+|---|---|---|
+| `OrdemServicoAberta` | OS confirmada no banco | `numeroOS`, `ambiente` |
+| `OrdemServicoStatusAlterado` | Cada troca de status | `statusAnterior`, `statusNovo`, `segundosNoStatusAnterior` |
+| `FalhaProcessamentoOS` | Abrir, avançar status, diagnosticar ou atribuir mecânico falhou | `operacao`, `regraDeNegocio` (recusa esperada × erro inesperado), `erro`, `mensagem` |
+| `FalhaIntegracao` | O e-mail ao cliente não saiu (a OS avança mesmo assim) | `integracao`, `operacao`, `erro` |
+
+**Logs.** No perfil `prod`, cada linha é um JSON (Elastic Common Schema) com o
+`correlationId` da requisição — recebido no cabeçalho `X-Correlation-Id` ou
+gerado, e devolvido na resposta — e os campos de negócio do evento. O agente
+encaminha os logs ao New Relic já com `trace.id` e `span.id`: de um erro no
+dashboard se chega ao trace da requisição e às outras linhas dela.
+
+As probes do Kubernetes (`/actuator/**`) ficam fora do APM: a cada poucos
+segundos em cada pod, elas dominariam o throughput e puxariam a latência média
+para baixo. Respostas 4xx não contam como erro — são a API recusando um pedido
+inválido.
+
+### Dashboards e alertas
+
+Criados por Terraform em `infra/newrelic`, um dashboard por ambiente
+(`Autopecas - homologacao`, `Autopecas - producao`):
+
+| Página | Mostra |
+|---|---|
+| Ordens de serviço | OS abertas hoje, volume diário (30 dias), tempo médio em diagnóstico, execução e finalização, últimas transições |
+| API | Latência p50/p95/p99, requisições por minuto e por status HTTP, endpoints mais lentos, disponibilidade do healthcheck |
+| Kubernetes | CPU e memória por pod, réplicas do HPA (atuais × desejadas × máximo), nós do cluster, reinícios, eventos |
+| Erros e integrações | Falhas de integração, falhas de processamento por operação, chamadas externas com erro, erros por tipo |
+| Logs | Erros e avisos com `trace.id` e `correlationId`, volume por nível |
+
+Alertas (política `autopecas`, por e-mail):
+
+| Condição | Dispara quando |
+|---|---|
+| Falha no processamento de OS | Qualquer erro **inesperado** numa operação de OS (regra de negócio recusando não conta) |
+| Latência p95 | Acima de 2 s por 5 minutos |
+| Respostas 5xx | Acima de 5% por 5 minutos |
+| Falha de integração | E-mail ao cliente não enviado (aviso) |
+| Healthcheck | Duas checagens seguidas sem `"status":"UP"` |
+
+### Como ligar
+
+São duas keys diferentes, e nenhuma vai para arquivo versionado:
+
+- **License key** (`...NRAL`): só **envia** dados. Vai para os pods e para o
+  cluster, sempre como Secret do Kubernetes criado por entrada padrão.
+- **User API key** (`NRAK-...`): **administra** a conta. Só o Terraform de
+  `infra/newrelic` usa, e o provider a lê da variável de ambiente.
+
+```bash
+export NEW_RELIC_LICENSE_KEY=...    # license key
+export NEW_RELIC_API_KEY=NRAK-...   # User API key
+
+# 1. Cluster: integração com o Kubernetes (repositório autopecas-infra-k8s)
+./scripts/up.sh
+
+# 2. Aplicação: o deploy liga o agente quando a license key está definida
+AMBIENTE=homologacao ./infra/scripts/deploy.sh
+
+# 3. Dashboards, alertas e monitor — rodar de novo a cada subida do ambiente,
+#    porque o gateway do Learner Lab muda de URL
+NEW_RELIC_ACCOUNT_ID=<id da conta> NEW_RELIC_EMAIL_ALERTAS=<e-mail> \
+  ./infra/scripts/observabilidade.sh
+```
+
+Sem `NEW_RELIC_LICENSE_KEY` tudo funciona como antes, sem monitoramento: a
+imagem nem carrega o agente.
+
+O monitor de disponibilidade depende de o gateway expor `GET /actuator/health`
+sem autenticação, encaminhado à aplicação pela VPC Link — configuração do
+repositório `autopecas-lambda-auth`. A aplicação já libera essa rota sem token
+e responde só `{"status":"UP"}` ou `DOWN`, sem detalhes.
 
 ## 🔄 CI/CD Local (Self-hosted Runner)
 
@@ -815,6 +930,9 @@ Aguarde `BUILD SUCCESS` e acesse o dashboard em `http://localhost:9000`.
 | JWT_JWKS_URI | URL pública de /.well-known/jwks.json |
 | JWT_AUDIENCE | Audience esperada; padrão autopecas-api |
 | SPRING_PROFILES_ACTIVE | dev ou prod |
+| AMBIENTE | homologacao, producao ou local; vai nos logs e nos eventos do New Relic |
+| NEW_RELIC_LICENSE_KEY | Opcional: liga o agente do New Relic (sem ela, a imagem sobe sem o agente) |
+| NEW_RELIC_APP_NAME | Nome da aplicação no New Relic; o deploy usa autopecas-api-&lt;ambiente&gt; |
 
 Os testes usam chaves efemeras e endpoints ficticios, sem acessar a AWS.
 Não há senha padrão de funcionário nem administrador nas migrations.

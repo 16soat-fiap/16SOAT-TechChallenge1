@@ -1,0 +1,223 @@
+# =============================================================================
+# API de ordens de serviço no EKS.
+#
+# Diferenças em relação ao infra/k8s/30-app-deployment.yaml (ambiente kind):
+#
+#  • A imagem vem do ECR. O marcador `IMAGE_URI` é substituído pelo pipeline
+#    (ver .github/workflows/cd-aws.yml) pela tag do commit — nunca `latest`,
+#    para que seja sempre possível dizer qual código está rodando.
+#
+#  • O topologySpreadConstraints agora espalha por ZONA, além de por nó. No
+#    kind as "zonas" eram fictícias; aqui são duas AZs de verdade, e espalhar
+#    por zona é o que faz a queda de uma AZ não derrubar o serviço.
+#
+#  • Um namespace por ambiente (`NAMESPACE` = homologacao ou producao), no
+#    mesmo cluster, e um NodePort por ambiente (`NODE_PORT`), porque NodePort
+#    vale para o cluster inteiro. O par namespace/NodePort casa com o mapa
+#    `node_ports` do repositório autopecas-infra-k8s.
+#
+#  • A configuração vem do ConfigMap `autopecas-config` e do Secret
+#    `autopecas-secrets`, criados pelo deploy a partir das saídas dos
+#    repositórios do banco (DB_URL) e da Lambda (emissor e chaves do JWT). A
+#    aplicação roda como `autopecas_app`, sem DDL, e com o Flyway desligado:
+#    as migrações são do Job 20-migracao-job.yaml.
+#
+# O que NÃO mudou, de propósito: requests, limites e probes. Foram medidos e os
+# números continuam valendo — ver os comentários no arquivo do ambiente kind e
+# em 40-app-hpa.yaml.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autopecas-api
+  namespace: NAMESPACE
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  # Piso igual ao minReplicas do HPA. Depois do primeiro apply quem manda no
+  # número de réplicas é o HPA — por isso não se ajusta este valor à mão.
+  replicas: HPA_MIN
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Zero indisponibilidade: sobe o pod novo, espera ele ficar ready, e só
+      # então remove o antigo. Exige capacidade para uma réplica extra — o
+      # Cluster Autoscaler cuida disso se não houver.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autopecas-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: autopecas-api
+        app.kubernetes.io/part-of: autopecas
+    spec:
+      topologySpreadConstraints:
+        # Primeiro por zona: duas AZs reais, e a perda de uma não deve levar
+        # todas as réplicas.
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: autopecas-api
+        # Depois por nó, dentro da zona.
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: autopecas-api
+      # ScheduleAnyway nos dois, e não DoNotSchedule: com o HPA podendo chegar a
+      # 10 réplicas sobre 2-4 nós, a distribuição perfeita é impossível, e
+      # DoNotSchedule deixaria pods Pending em vez de atender a carga. A
+      # preferência é respeitada quando há espaço.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          # Substituído pelo pipeline. Se você aplicar este arquivo à mão sem
+          # trocar, o pod fica em ImagePullBackOff — é o sintoma esperado.
+          image: IMAGE_URI
+          # A tag é o SHA do commit, então nunca muda de conteúdo: não há o que
+          # repuxar. `Always` só somaria uma consulta ao ECR em cada start.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: autopecas-config
+            - secretRef:
+                name: autopecas-secrets
+          env:
+            # 70% do limite de 1Gi deixa margem para metaspace, threads e
+            # buffers off-heap, que não entram no heap contado pela flag.
+            - name: JAVA_OPTS
+              value: "-XX:MaxRAMPercentage=70.0"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40      # até ~3min30 para subir (Flyway + JPA)
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            # Liveness NÃO depende do banco, de propósito: apontá-la para um
+            # endpoint que consulta o Postgres faria uma indisponibilidade do
+            # RDS virar reinício em cascata de todos os pods.
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              # 768Mi e não 512Mi: medido com carga real, o pod estabiliza em
+              # ~420Mi. Com request de 512Mi isso dava 82% de utilização em
+              # regime permanente — acima do alvo do HPA, que passaria a
+              # escalar por memória sem nunca convergir (ver 40-app-hpa.yaml).
+              memory: 768Mi
+            limits:
+              # Sem limite de CPU de propósito: throttling de CPU numa JVM
+              # prejudica muito a latência, e o request já garante a fatia
+              # mínima. Memória tem limite porque estouro precisa virar OOMKill.
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem exige um volume gravável para o /tmp que a
+            # JVM e o Tomcat usam.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      # Tempo para o `server.shutdown: graceful` drenar as requisições em voo.
+      # Conversa com o deregistration_delay de 30s do target group no NLB.
+      terminationGracePeriodSeconds: 40
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autopecas-api
+  namespace: NAMESPACE
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: autopecas-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# =============================================================================
+# A porta por onde o NLB interno entrega o tráfego vindo do API Gateway.
+#
+# `externalTrafficPolicy` fica no padrão (Cluster), e isso é intencional: com
+# `Local`, um nó sem réplica da API reprovaria o health check do target group e
+# sairia do balanceamento. Como os alvos registrados são os NÓS (e não os IPs
+# dos pods), isso reduziria a capacidade de entrada a cada scale-down. Em troca,
+# aceita-se um salto extra de kube-proxy quando o pod está em outro nó.
+#
+# `NODE_PORT` precisa casar com o mapa `node_ports` do repositório
+# autopecas-infra-k8s — produção 30080, homologação 30081 —, que cria o
+# listener do NLB e a regra de security group de cada um.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: autopecas-api-nodeport
+  namespace: NAMESPACE
+  labels:
+    app.kubernetes.io/name: autopecas-api
+    app.kubernetes.io/part-of: autopecas
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: autopecas-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: NODE_PORT
+---
+# Impede que uma drenagem de nó — `kubectl drain`, upgrade do node group, ou o
+# Cluster Autoscaler removendo um nó ocioso — evacue mais de uma réplica por
+# vez.
+#
+# `maxUnavailable: 1` em vez de `minAvailable: 1`: com o HPA variando entre 2 e
+# 10 réplicas, `minAvailable: 1` permitiria derrubar 9 de uma vez. O limite
+# relativo acompanha o tamanho real da frota.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: autopecas-api
+  namespace: NAMESPACE
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: autopecas-api

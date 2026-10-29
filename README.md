@@ -12,17 +12,15 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 - [Arquitetura e Design](#-arquitetura-e-design)
 - [Estrutura do Projeto](#-estrutura-do-projeto)
 - [Modelo de Domínio](#-modelo-de-domínio)
-- [Segurança e Controle de Acesso](#-segurança-e-controle-de-acesso)
+- [Segurança e autenticação](#segurança-e-autenticação)
 - [Endpoints da API](#-endpoints-da-api)
-- [Infraestrutura e Execução](#-infraestrutura-e-execução)
-  - [Pré-requisitos](#pré-requisitos)
-  - [Containerização (Docker)](#containerização-docker)
-  - [Provisionamento (Terraform)](#provisionamento-terraform)
-  - [Orquestração (Kubernetes)](#orquestração-kubernetes)
-  - [Passo a passo completo](#passo-a-passo-completo)
-  - [Autoscaling](#autoscaling-como-verificar)
-  - [Segredos em produção](#segredos-em-produção)
-  - [Operação e diagnóstico](#operação-e-diagnóstico)
+- [Infraestrutura e execução](#infraestrutura-e-execução)
+  - [Docker Compose](#docker-compose)
+  - [Kubernetes local](#kubernetes-local)
+- [Deploy na AWS (Fase 3)](#️-deploy-na-aws-fase-3)
+  - [Ambientes](#ambientes)
+  - [Como o deploy funciona](#como-o-deploy-funciona)
+  - [Deploy automático](#deploy-automático)
 - [CI/CD Local (Self-hosted Runner)](#-cicd-local-self-hosted-runner)
   - [Como funciona o pipeline](#como-funciona-o-pipeline)
   - [Pré-requisitos da máquina](#pré-requisitos-da-máquina)
@@ -34,7 +32,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Verificar o runner no GitHub](#verificar-o-runner-no-github)
 - [Testes e Cobertura](#-testes-e-cobertura)
 - [Análise de Qualidade (SonarQube)](#-análise-de-qualidade-sonarqube)
-- [Variáveis de Ambiente](#-variáveis-de-ambiente)
+- [Variáveis de ambiente](#variaveis-de-ambiente)
 - [Diagramas](#-diagramas)
 
 ---
@@ -163,7 +161,7 @@ src/test/java/com/autopecas/autopecas/
 └── integration/                     # Testcontainers + PostgreSQL real (schema via Flyway)
 ```
 
-Infraestrutura (detalhada na seção [Infraestrutura e Execução](#-infraestrutura-e-execução)):
+Infraestrutura (detalhada nas seções [Infraestrutura e execução](#infraestrutura-e-execução) e [Deploy na AWS](#️-deploy-na-aws-fase-3)):
 
 ```
 Dockerfile                           # build em 3 estágios, JAR em camadas
@@ -463,6 +461,99 @@ O ambiente AWS definitivo usa os repositórios separados de infraestrutura
 Kubernetes e banco gerenciado. A preparacao local não altera esses recursos.
 A pipeline de deploy e responsabilidade de outro integrante; veja o handoff
 em docs/autenticacao-lambda.md antes de executar a pipeline antiga.
+
+## ☁️ Deploy na AWS (Fase 3)
+
+A aplicação roda num cluster **Amazon EKS** atrás de um **API Gateway**, com
+autenticação por CPF numa **Lambda** e banco **RDS PostgreSQL**. A
+infraestrutura está dividida em quatro repositórios, e este cuida só da
+aplicação e do deploy dela:
+
+| Repositório | Responsabilidade |
+|---|---|
+| [`autopecas-lambda-auth`](https://github.com/16soat-fiap/autopecas-lambda-auth) | Lambda de login por CPF/CNPJ (emite o JWT) e o API Gateway |
+| [`autopecas-infra-k8s`](https://github.com/16soat-fiap/autopecas-infra-k8s) | Rede, cluster EKS com autoscaling, NLB interno, VPC Link, ECR |
+| [`autopecas-infra-db-teste`](https://github.com/16soat-fiap/autopecas-infra-db-teste) | RDS PostgreSQL por ambiente e usuários restritos |
+| **`16SOAT-TechChallenge1`** (este) | Aplicação, manifestos do EKS e deploy |
+
+```mermaid
+flowchart LR
+  C[Cliente] --> G[API Gateway]
+  G -->|POST /auth CPF| L[Lambda] --> DB[(RDS)]
+  G -->|/api/* com JWT válido| VL[VPC Link] --> NLB[NLB interno]
+  NLB -->|NodePort 30080 produção<br/>30081 homologação| P[Pods da API<br/>namespace por ambiente]
+  P -->|autopecas_app, sem DDL| DB
+  J[Job de migração<br/>dono do banco] -.antes de cada deploy.-> DB
+```
+
+### Ambientes
+
+Homologação e produção compartilham o mesmo cluster, cada um no seu namespace,
+com o seu banco, o seu stage no API Gateway e o seu NodePort:
+
+| | Branch | Namespace | NodePort | Réplicas (HPA) |
+|---|---|---|---|---|
+| Homologação | `homologacao` | `homologacao` | 30081 | 1 a 3 |
+| Produção | `main` | `producao` | 30080 | 2 a 8 |
+
+As faixas de réplicas somadas (11) cabem na capacidade dos 4 nós do cluster
+(~12 réplicas): os dois ambientes dividem a mesma frota.
+
+### Como o deploy funciona
+
+`infra/scripts/deploy.sh` — o mesmo script no pipeline e na mão:
+
+1. **Lê as saídas dos outros repositórios** direto do bucket de state
+   compartilhado (`autopecas-tfstate-<id-da-conta>`): ECR e cluster, `db_url`
+   do banco do ambiente, emissor e chaves do JWT da Lambda. Nenhum valor de
+   conta fica no código.
+2. **Testa, constrói e publica** a imagem no ECR, com a tag do commit.
+3. **Cria o namespace, o ConfigMap e os Secrets** do ambiente. As senhas
+   chegam por variável de ambiente e viram Secret por entrada padrão, nunca por
+   argumento de linha de comando.
+4. **Roda as migrações num Job**, com o dono do banco: um container inicial
+   copia os scripts do Flyway de dentro da própria imagem, e o Flyway oficial
+   os aplica. Se a migração falhar, o deploy para **antes** de trocar a
+   aplicação. A credencial do dono do banco é apagada do cluster ao final.
+5. **Sobe a aplicação** como `autopecas_app`, que não tem DDL, com o Flyway
+   desligado, e espera o rollout.
+
+```bash
+export APP_DB_PASSWORD=...                   # senha do autopecas_app
+export DB_ADMIN_USERNAME=... DB_ADMIN_PASSWORD=...  # dono do banco, só para migrar
+
+AMBIENTE=homologacao ./infra/scripts/deploy.sh
+AMBIENTE=homologacao SMOKE_DOCUMENTO=<CPF de um cliente ativo> ./infra/scripts/smoke.sh
+```
+
+Pré-requisitos: Docker, bash e uma credencial da AWS (no Learner Lab, a da
+sessão). AWS CLI e kubectl vêm da imagem `infra/docker/toolbox.Dockerfile`
+quando não estão instalados. **Uma vez por banco**, o administrador cria o
+usuário `autopecas_app` com os scripts do repositório do banco.
+
+O `smoke.sh` verifica o caminho inteiro em quatro casos: a chave pública do
+emissor responde, uma rota protegida sem token é barrada no gateway (401), o
+login por CPF devolve um token que a API aceita, e um token adulterado é
+recusado.
+
+### Deploy automático
+
+| Workflow | Quando | O que faz |
+|---|---|---|
+| `ci-manifestos-aws.yml` | PR e push | Renderiza os manifestos dos dois ambientes e valida com kubeconform; confere a sintaxe dos scripts |
+| `cd-aws.yml` | push em `homologacao` ou `main` | `deploy.sh` + `smoke.sh` no ambiente da branch |
+
+Para ligar o CD (Settings → Secrets and variables → Actions):
+
+- variável `AWS_CD_HABILITADO` = `true`;
+- secrets do repositório `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` e
+  `AWS_SESSION_TOKEN`, da sessão do Learner Lab — expiram em ~4h e precisam
+  ser atualizados a cada sessão, porque o Lab não permite OIDC;
+- em cada ambiente (Settings → Environments → `homologacao` / `producao`):
+  `APP_DB_PASSWORD`, `DB_ADMIN_USERNAME`, `DB_ADMIN_PASSWORD` e, opcional,
+  `SMOKE_DOCUMENTO`.
+
+Sem `AWS_CD_HABILITADO`, o workflow é ignorado em vez de falhar.
 
 ## 🔄 CI/CD Local (Self-hosted Runner)
 

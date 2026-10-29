@@ -528,8 +528,21 @@ AMBIENTE=homologacao SMOKE_DOCUMENTO=<CPF de um cliente ativo> ./infra/scripts/s
 
 Pré-requisitos: Docker, bash e uma credencial da AWS (no Learner Lab, a da
 sessão). AWS CLI e kubectl vêm da imagem `infra/docker/toolbox.Dockerfile`
-quando não estão instalados. **Uma vez por banco**, o administrador cria o
-usuário `autopecas_app` com os scripts do repositório do banco.
+quando não estão instalados.
+
+**Primeiro deploy de cada banco.** As permissões do `autopecas_app` e do
+`lambda_auth` são dadas tabela por tabela, então só podem ser concedidas depois
+que as migrações criam as tabelas:
+
+1. `SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh`: publica a imagem e roda
+   só as migrações.
+2. O administrador roda os scripts `criar-usuario-*.sql` e o
+   `verificar-permissoes.sql` do repositório do banco.
+3. `PULAR_MIGRACAO=sim ./infra/scripts/deploy.sh`: sobe a aplicação.
+
+Nos deploys seguintes basta o comando do bloco acima. Se uma migração nova
+criar tabela ou sequence, a lista do `permissoes-aplicacao.sql` precisa ser
+atualizada e reaplicada antes do deploy.
 
 O `smoke.sh` verifica o caminho inteiro em quatro casos: a chave pública do
 emissor responde, uma rota protegida sem token é barrada no gateway (401), o

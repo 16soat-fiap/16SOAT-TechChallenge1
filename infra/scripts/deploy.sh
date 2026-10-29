@@ -15,7 +15,12 @@
 #
 # Os três guardam o state no mesmo bucket; este script só LÊ as saídas deles
 # (ver output_remoto em lib.sh). E, uma vez por banco, o administrador cria o
-# usuário `autopecas_app` com os scripts do repositório do banco.
+# usuário `autopecas_app` com os scripts do repositório do banco — depois das
+# migrações, porque as permissões são dadas tabela por tabela:
+#
+#   SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh   # 1. cria as tabelas
+#   (scripts criar-usuario-*.sql do repositório do banco)   # 2. permissões
+#   PULAR_MIGRACAO=sim   ./infra/scripts/deploy.sh   # 3. sobe a aplicação
 #
 # ─── Senhas, por variável de ambiente ────────────────────────────────────────
 #
@@ -35,6 +40,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 AMBIENTE="${AMBIENTE:-homologacao}"
 PULAR_TESTES="${PULAR_TESTES:-nao}"
 PULAR_MIGRACAO="${PULAR_MIGRACAO:-nao}"
+# Para depois das migrações, sem subir a aplicação. É a PRIMEIRA vez de cada
+# banco: as migrações criam as tabelas, o administrador dá ao `autopecas_app` e
+# ao `lambda_auth` as permissões NELAS (scripts do repositório do banco), e só
+# então um deploy completo sobe a aplicação — que antes disso falharia ao ler
+# tabelas sem permissão.
+SOMENTE_MIGRACAO="${SOMENTE_MIGRACAO:-nao}"
 APP_DB_USERNAME="${APP_DB_USERNAME:-autopecas_app}"
 
 # Cada ambiente: o NodePort por onde o NLB o alcança (mapa `node_ports` do
@@ -47,6 +58,9 @@ case "$AMBIENTE" in
 esac
 NAMESPACE="$AMBIENTE"
 
+if [ "$SOMENTE_MIGRACAO" = "sim" ] && [ "$PULAR_MIGRACAO" = "sim" ]; then
+  morrer "SOMENTE_MIGRACAO=sim e PULAR_MIGRACAO=sim não fazem sentido juntas."
+fi
 if [ -z "${APP_DB_PASSWORD:-}" ]; then
   morrer "APP_DB_PASSWORD não definida — é a senha do usuário ${APP_DB_USERNAME} no banco de ${AMBIENTE}."
 fi
@@ -270,6 +284,20 @@ EOF
 
   # A credencial do dono do banco não precisa ficar no cluster entre deploys.
   kubectl_ delete secret autopecas-migracao -n "$NAMESPACE" --ignore-not-found >/dev/null
+fi
+
+if [ "$SOMENTE_MIGRACAO" = "sim" ]; then
+  titulo "Migração concluída (SOMENTE_MIGRACAO=sim)"
+  cat <<EOF
+
+  As tabelas existem. Antes de subir a aplicação, o administrador do banco
+  precisa dar as permissões ao autopecas_app e ao lambda_auth — scripts
+  criar-usuario-*.sql do repositório autopecas-infra-db. Depois:
+
+      AMBIENTE=${AMBIENTE} ./infra/scripts/deploy.sh
+
+EOF
+  exit 0
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

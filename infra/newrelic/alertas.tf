@@ -40,12 +40,14 @@ resource "newrelic_nrql_alert_condition" "falha_processamento_os" {
     threshold_occurrences = "at_least_once"
   }
 
-  # Evento raro: sem dado é "nenhuma falha", não "sinal perdido".
+  # Evento raro: sem dado é "nenhuma falha", não "sinal perdido". E event_timer,
+  # não event_flow: no event_flow a janela só fecha quando chega um evento
+  # posterior — com uma falha isolada, o incidente nunca abriria.
   fill_option                  = "static"
   fill_value                   = 0
   aggregation_window           = 60
-  aggregation_method           = "event_flow"
-  aggregation_delay            = 120
+  aggregation_method           = "event_timer"
+  aggregation_timer            = 60
   violation_time_limit_seconds = 86400
 }
 
@@ -133,11 +135,12 @@ resource "newrelic_nrql_alert_condition" "falha_integracao" {
     threshold_occurrences = "all"
   }
 
+  # Evento raro, como a falha de processamento: event_timer.
   fill_option                  = "static"
   fill_value                   = 0
   aggregation_window           = 60
-  aggregation_method           = "event_flow"
-  aggregation_delay            = 120
+  aggregation_method           = "event_timer"
+  aggregation_timer            = 60
   violation_time_limit_seconds = 86400
 }
 

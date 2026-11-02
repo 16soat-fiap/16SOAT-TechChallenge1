@@ -1,5 +1,7 @@
 # 🔧 Oficina Mecânica — Sistema de Gestão de Ordens de Serviço (MVP)
 
+## Propósito
+
 > Back-end do sistema integrado de atendimento e execução de serviços para uma oficina mecânica de médio porte. Permite gerenciar clientes, veículos, ordens de serviço, orçamentos, peças e funcionários, com acompanhamento em tempo real e autorização de reparos via aplicativo.
 
 Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
@@ -8,6 +10,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
 
 ## 📑 Índice
 
+- [Propósito](#propósito)
 - [Stack Tecnológica](#-stack-tecnológica)
 - [Arquitetura e Design](#-arquitetura-e-design)
 - [Estrutura do Projeto](#-estrutura-do-projeto)
@@ -254,14 +257,28 @@ Cole o JWT em Authorize > BearerAuth no Swagger. Probes de saúde continuam
 públicas na rede interna. As APIs de negócio exigem JWT e preservam @PreAuthorize.
 
 Detalhes, concessão de permissões e migração:
-[autenticação sem Keycloak](docs/autenticacao-lambda.md).
+[contrato de autenticação da Lambda](https://github.com/16soat-fiap/autopecas-lambda-auth#readme).
 
 ## 🌐 Endpoints da API
 
 A documentação interativa completa está disponível via Swagger após subir a aplicação:
 
-> **Swagger UI:** `http://localhost:8080/swagger-ui.html`  
-> **OpenAPI JSON:** `http://localhost:8080/v3/api-docs`
+> **Swagger UI:** [Abrir documentação local](http://localhost:8080/swagger-ui.html)
+> **OpenAPI JSON:** [Abrir especificação local](http://localhost:8080/v3/api-docs)
+
+### Acessar a documentação no EKS
+
+A aplicação não possui ingresso público. Com kubectl e o contexto do cluster configurados, abra um túnel administrativo para o Service:
+
+~~~bash
+kubectl -n homologacao port-forward service/autopecas-api 8080:8080
+~~~
+
+Mantenha o comando aberto e use [Swagger UI](http://localhost:8080/swagger-ui.html) ou [OpenAPI JSON](http://localhost:8080/v3/api-docs). Para produção, substitua o namespace por producao.
+
+O port-forward depende das permissões Kubernetes e não publica o Service na internet. O catálogo atual do Gateway não inclui as rotas de Swagger/OpenAPI.
+
+A emissão de tokens e a coleção Postman estão no [README da Lambda](https://github.com/16soat-fiap/autopecas-lambda-auth#readme). Para testar operações protegidas pelo Swagger, obtenha um JWT e informe-o em Authorize → BearerAuth, respeitando as roles e a propriedade dos recursos.
 
 ### Clientes — `/api/clientes`
 
@@ -440,14 +457,14 @@ export JWT_AUDIENCE="autopecas-api"
 docker compose up -d --build
 ~~~
 
-A API fica em http://localhost:8080 é o Swagger em /swagger-ui.html.
+A API fica em http://localhost:8080 e o [Swagger UI](http://localhost:8080/swagger-ui.html) documenta seus endpoints.
 A aplicação não emite tokens nem recebe a chave privada. O banco local usa
 Flyway para criar e evoluir o schema; em prod não se deve usar ddl-auto=create.
 
 ### Kubernetes local
 
 infra/terraform continua provisionando o cluster kind e PostgreSQL local.
-infra/k8s contem os manifests da aplicação e suas probes/HPA. Os recursos
+infra/k8s contém os manifests da aplicação e suas probes/HPA. Os recursos
 do antigo Identity Provider foram removidos. Configure o issuer/JWKS reais
 em infra/k8s/10-configmap-app.yaml antes de publicar.
 
@@ -457,14 +474,15 @@ terraform -chdir=infra/terraform plan
 docker build -t autopecas-api:local .
 ~~~
 
-Revise planos de infraestrutura existente antes de aplicar: a remocao dos
+Revise planos de infraestrutura existente antes de aplicar: a remoção dos
 recursos antigos pode recriar o cluster kind se o mapeamento de portas mudar.
-Não remova volumes ou bancos existentes sem preservar os dados necessarios.
+Não remova volumes ou bancos existentes sem preservar os dados necessários.
 
 O ambiente AWS definitivo usa os repositórios separados de infraestrutura
-Kubernetes e banco gerenciado. A preparacao local não altera esses recursos.
-A pipeline de deploy e responsabilidade de outro integrante; veja o handoff
-em docs/autenticacao-lambda.md antes de executar a pipeline antiga.
+Kubernetes e banco gerenciado. A preparação local não altera esses recursos.
+O deploy AWS atual usa cd-aws.yml e infra/scripts/deploy.sh, descritos abaixo.
+O workflow local legado possui etapas antigas e não deve ser confundido com
+o procedimento atual de publicação na AWS.
 
 ## ☁️ Deploy na AWS (Fase 3)
 
@@ -477,13 +495,13 @@ aplicação e do deploy dela:
 |---|---|
 | [`autopecas-lambda-auth`](https://github.com/16soat-fiap/autopecas-lambda-auth) | Lambda de login por CPF/CNPJ (emite o JWT) e o API Gateway |
 | [`autopecas-infra-k8s`](https://github.com/16soat-fiap/autopecas-infra-k8s) | Rede, cluster EKS com autoscaling, NLB interno, VPC Link, ECR |
-| [`autopecas-infra-db-teste`](https://github.com/16soat-fiap/autopecas-infra-db-teste) | RDS PostgreSQL por ambiente e usuários restritos |
+| [`autopecas-infra-db`](https://github.com/16soat-fiap/autopecas-infra-db) | RDS PostgreSQL por ambiente e usuários restritos |
 | **`16SOAT-TechChallenge1`** (este) | Aplicação, manifestos do EKS e deploy |
 
 ```mermaid
 flowchart LR
   C[Cliente] --> G[API Gateway]
-  G -->|POST /auth CPF| L[Lambda] --> DB[(RDS)]
+  G -->|POST /auth ou /auth/funcionarios| L[Lambda] --> DB[(RDS)]
   G -->|/api/* com JWT válido| VL[VPC Link] --> NLB[NLB interno]
   NLB -->|NodePort 30080 produção<br/>30081 homologação| P[Pods da API<br/>namespace por ambiente]
   P -->|autopecas_app, sem DDL| DB
@@ -500,8 +518,9 @@ com o seu banco, o seu stage no API Gateway e o seu NodePort:
 | Homologação | `homologacao` | `homologacao` | 30081 | 1 a 3 |
 | Produção | `main` | `producao` | 30080 | 2 a 8 |
 
-As faixas de réplicas somadas (11) cabem na capacidade dos 4 nós do cluster
-(~12 réplicas): os dois ambientes dividem a mesma frota.
+Os dois ambientes dividem a mesma frota. A capacidade para atingir os dois
+máximos simultaneamente depende dos requests, componentes do cluster e
+carga; não é garantida apenas pela configuração de maxReplicas.
 
 ### Como o deploy funciona
 
@@ -522,13 +541,20 @@ As faixas de réplicas somadas (11) cabem na capacidade dos 4 nós do cluster
 5. **Sobe a aplicação** como `autopecas_app`, que não tem DDL, com o Flyway
    desligado, e espera o rollout.
 
-```bash
-export APP_DB_PASSWORD=...                   # senha do autopecas_app
-export DB_ADMIN_USERNAME=... DB_ADMIN_PASSWORD=...  # dono do banco, só para migrar
+~~~bash
+export DB_ADMIN_USERNAME="autopecas_admin"
+read -rs -p "Senha do usuario autopecas_app: " APP_DB_PASSWORD
+printf '\n'
+read -rs -p "Senha do proprietario do banco: " DB_ADMIN_PASSWORD
+printf '\n'
+export APP_DB_PASSWORD DB_ADMIN_PASSWORD
 
-AMBIENTE=homologacao ./infra/scripts/deploy.sh
-AMBIENTE=homologacao SMOKE_DOCUMENTO=<CPF de um cliente ativo> ./infra/scripts/smoke.sh
-```
+AMBIENTE=homologacao bash infra/scripts/deploy.sh
+
+read -r -p "CPF de um cliente ativo para o smoke test: " SMOKE_DOCUMENTO
+export SMOKE_DOCUMENTO
+AMBIENTE=homologacao bash infra/scripts/smoke.sh
+~~~
 
 Pré-requisitos: Docker, bash e uma credencial da AWS (no Learner Lab, a da
 sessão). AWS CLI e kubectl vêm da imagem `infra/docker/toolbox.Dockerfile`
@@ -538,11 +564,11 @@ quando não estão instalados.
 `lambda_auth` são dadas tabela por tabela, então só podem ser concedidas depois
 que as migrações criam as tabelas:
 
-1. `SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh`: publica a imagem e roda
+1. `AMBIENTE=homologacao SOMENTE_MIGRACAO=sim bash infra/scripts/deploy.sh`: publica a imagem e roda
    só as migrações.
 2. O administrador roda os scripts `criar-usuario-*.sql` e o
    `verificar-permissoes.sql` do repositório do banco.
-3. `PULAR_MIGRACAO=sim ./infra/scripts/deploy.sh`: sobe a aplicação.
+3. `AMBIENTE=homologacao PULAR_MIGRACAO=sim bash infra/scripts/deploy.sh`: sobe a aplicação.
 
 Nos deploys seguintes basta o comando do bloco acima. Se uma migração nova
 criar tabela ou sequence, a lista do `permissoes-aplicacao.sql` precisa ser
@@ -667,12 +693,13 @@ export NEW_RELIC_API_KEY=NRAK-...   # User API key
 ./scripts/up.sh
 
 # 2. Aplicação: o deploy liga o agente quando a license key está definida
-AMBIENTE=homologacao ./infra/scripts/deploy.sh
+AMBIENTE=homologacao bash infra/scripts/deploy.sh
 
 # 3. Dashboards, alertas e monitor — rodar de novo a cada subida do ambiente,
 #    porque o gateway do Learner Lab muda de URL
-NEW_RELIC_ACCOUNT_ID=<id da conta> NEW_RELIC_EMAIL_ALERTAS=<e-mail> \
-  ./infra/scripts/observabilidade.sh
+export NEW_RELIC_ACCOUNT_ID="ID_DA_CONTA_NEW_RELIC"
+export NEW_RELIC_EMAIL_ALERTAS="email@exemplo.com"
+bash infra/scripts/observabilidade.sh
 ```
 
 Sem `NEW_RELIC_LICENSE_KEY` tudo funciona como antes, sem monitoramento: a
@@ -684,6 +711,12 @@ repositório `autopecas-lambda-auth`. A aplicação já libera essa rota sem tok
 e responde só `{"status":"UP"}` ou `DOWN`, sem detalhes.
 
 ## 🔄 CI/CD Local (Self-hosted Runner)
+
+**Fluxo local legado:** o workflow abaixo ainda contém etapas de Keycloak,
+embora a autenticação atual use a Lambda. Essas etapas precisam ser revisadas
+antes de usar esse workflow. O deploy AWS vigente é o de
+[Deploy na AWS](#️-deploy-na-aws-fase-3), com cd-aws.yml e deploy.sh.
+A alteração desta documentação não modifica a pipeline.
 
 O pipeline de CI/CD está definido em `.github/workflows/ci-cd-local.yml` e é composto por três
 jobs executados em sequência:
@@ -919,7 +952,7 @@ Aguarde `BUILD SUCCESS` e acesse o dashboard em `http://localhost:9000`.
 
 ---
 
-## Variaveis de ambiente
+## Variáveis de ambiente
 
 | Variavel | Uso |
 | --- | --- |

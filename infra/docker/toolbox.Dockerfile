@@ -57,9 +57,11 @@ RUN curl -fsSLo /tmp/awscli.zip \
     && rm -rf /tmp/awscli.zip /tmp/aws \
     && aws --version
 
-# Versão fixada e alinhada com `kubernetes_version` da stack 03. O kubectl tem
-# compatibilidade de ±1 minor com o servidor, então 1.31 cobre de 1.30 a 1.32.
-ARG KUBECTL_VERSION=v1.31.4
+# Versão fixada e alinhada com o cluster do repositório autopecas-infra-k8s
+# (EKS 1.35). O kubectl tem compatibilidade de ±1 minor com o servidor. A mesma
+# versão da toolbox daquele repositório: as duas imagens usam a mesma tag
+# (autopecas-toolbox:local), e quem constrói primeiro define o que a outra usa.
+ARG KUBECTL_VERSION=v1.35.10
 RUN curl -fsSLo /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod 0755 /usr/local/bin/kubectl \

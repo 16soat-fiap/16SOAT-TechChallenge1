@@ -19,7 +19,7 @@
 # migrações, porque as permissões são dadas tabela por tabela:
 #
 #   SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh   # 1. cria as tabelas
-#   (scripts criar-usuario-*.sql do repositório do banco)   # 2. permissões
+#   ./infra/scripts/preparar-banco.sh                # 2. usuários e permissões
 #   PULAR_MIGRACAO=sim   ./infra/scripts/deploy.sh   # 3. sobe a aplicação
 #
 # ─── Senhas, por variável de ambiente ────────────────────────────────────────
@@ -304,11 +304,15 @@ if [ "$SOMENTE_MIGRACAO" = "sim" ]; then
   titulo "Migração concluída (SOMENTE_MIGRACAO=sim)"
   cat <<EOF
 
-  As tabelas existem. Antes de subir a aplicação, o administrador do banco
-  precisa dar as permissões ao autopecas_app e ao lambda_auth — scripts
-  criar-usuario-*.sql do repositório autopecas-infra-db. Depois:
+  As tabelas existem. Antes de subir a aplicação, crie os usuários
+  autopecas_app e lambda_auth e dê as permissões (scripts do repositório
+  autopecas-infra-db, rodados no cluster):
 
-      AMBIENTE=${AMBIENTE} ./infra/scripts/deploy.sh
+      AMBIENTE=${AMBIENTE} ./infra/scripts/preparar-banco.sh
+
+  Depois:
+
+      AMBIENTE=${AMBIENTE} PULAR_MIGRACAO=sim ./infra/scripts/deploy.sh
 
 EOF
   exit 0

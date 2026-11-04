@@ -22,6 +22,7 @@ Desenvolvido como parte do **Tech Challenge — FIAP 16SOAT**.
   - [Kubernetes local](#kubernetes-local)
 - [Deploy na AWS (Fase 3)](#️-deploy-na-aws-fase-3)
   - [Ambientes](#ambientes)
+  - [Subir do zero](#subir-do-zero)
   - [Como o deploy funciona](#como-o-deploy-funciona)
   - [Deploy automático](#deploy-automático)
 - [Monitoramento (New Relic)](#-monitoramento-new-relic)
@@ -522,6 +523,84 @@ Os dois ambientes dividem a mesma frota. A capacidade para atingir os dois
 máximos simultaneamente depende dos requests, componentes do cluster e
 carga; não é garantida apenas pela configuração de maxReplicas.
 
+### Subir do zero
+
+A ordem completa para um ambiente numa conta vazia (no Learner Lab, a cada
+sessão). Leva cerca de 1 hora, quase toda no EKS e no RDS. Clone os quatro
+repositórios lado a lado e rode cada passo na raiz do repositório indicado.
+
+Pré-requisitos: Docker e Git Bash (no Windows) ou bash; credencial da AWS (no
+Lab, cole a da sessão em `~/.aws/credentials`). Os repositórios do banco e da
+Lambda usam Terraform e OpenSSL locais, como descrito nos READMEs deles.
+
+Senhas, escolhidas por você e reutilizadas entre os passos:
+
+| Variável | O que é | Usada em |
+|---|---|---|
+| `DB_ADMIN_PASSWORD` | dono do banco (`autopecas_admin`) | banco (`TF_VAR_db_password`), migração, preparo |
+| `LAMBDA_DB_PASSWORD` | usuário `lambda_auth` | Lambda (`TF_VAR_db_password`), preparo |
+| `APP_DB_PASSWORD` | usuário `autopecas_app` | preparo, deploy |
+
+```bash
+export AMBIENTE=homologacao DB_ADMIN_USERNAME=autopecas_admin
+export DB_ADMIN_PASSWORD=... LAMBDA_DB_PASSWORD=... APP_DB_PASSWORD=...
+export NEW_RELIC_LICENSE_KEY=...    # opcional, liga o monitoramento
+
+# 1. Rede, cluster, NLB e VPC Link (~45 min)                    autopecas-infra-k8s
+./scripts/up.sh
+
+# 2. Banco (~10 min)                                            autopecas-infra-db
+#    Os valores de rede vêm das saídas do passo 1, gerados por este repositório:
+A=../16SOAT-TechChallenge1/infra/scripts/valores-aws.sh
+$A banco         > terraform/environments/${AMBIENTE}.tfvars
+$A banco-backend > terraform/environments/${AMBIENTE}.s3.tfbackend
+TF_VAR_db_password="$DB_ADMIN_PASSWORD" terraform -chdir=terraform init -reconfigure \
+  -backend-config=environments/${AMBIENTE}.s3.tfbackend
+TF_VAR_db_password="$DB_ADMIN_PASSWORD" terraform -chdir=terraform apply \
+  -var-file=environments/${AMBIENTE}.tfvars
+
+# 3. Lambda e API Gateway (~5 min)                              autopecas-lambda-auth
+#    Chave do JWT: ver "Deploy na AWS" no README do repositório (TF_VAR_jwt_private_key).
+A=../16SOAT-TechChallenge1/infra/scripts/valores-aws.sh
+$A lambda         > terraform/environments/${AMBIENTE}.tfvars
+$A lambda-backend > terraform/environments/${AMBIENTE}.s3.tfbackend
+mvn clean package                    # o artefato que o Terraform publica
+terraform -chdir=terraform init -reconfigure -backend-config=environments/${AMBIENTE}.s3.tfbackend
+TF_VAR_db_password="$LAMBDA_DB_PASSWORD" terraform -chdir=terraform apply \
+  -var-file=environments/${AMBIENTE}.tfvars -var-file=routes/application.json
+
+# 4. Aplicação (~10 min)                                        16SOAT-TechChallenge1
+SOMENTE_MIGRACAO=sim ./infra/scripts/deploy.sh   # cria as tabelas
+./infra/scripts/preparar-banco.sh                # usuários, permissões, dados de demonstração
+PULAR_MIGRACAO=sim   ./infra/scripts/deploy.sh   # sobe a aplicação
+SMOKE_DOCUMENTO=52998224725 ./infra/scripts/smoke.sh
+
+# 5. Dashboards, alertas e monitor (opcional)                   16SOAT-TechChallenge1
+#    Ver "Monitoramento (New Relic) → Como ligar".
+```
+
+O `preparar-banco.sh` roda os scripts do `autopecas-infra-db` num Job dentro do
+cluster, porque o RDS é privado e não há bastion. Por padrão ele procura o
+repositório em `../autopecas-infra-db`; outro caminho vai em `DB_REPO`. Em
+homologação ele carrega os dados de demonstração. Com eles, o smoke usa a
+cliente Maria Silva (CPF 52998224725), e a atendente Paula (CPF 15350946056,
+com as permissões ADMIN e ATENDENTE) entra por `POST /auth/funcionarios`.
+
+**Para derrubar**, na ordem inversa, e mesmo que a subida tenha parado no meio:
+
+```bash
+terraform -chdir=terraform destroy -var-file=environments/${AMBIENTE}.tfvars \
+  -var-file=routes/application.json                             # autopecas-lambda-auth
+terraform -chdir=terraform destroy -var-file=environments/${AMBIENTE}.tfvars   # autopecas-infra-db
+./scripts/down.sh --tudo                                        # autopecas-infra-k8s
+```
+
+O `down.sh` leva o cluster com tudo o que roda nele, inclusive a aplicação.
+Os dois `destroy` pedem as mesmas variáveis `TF_VAR_*` do apply. Sobram o ECR e
+o bucket de state, que custam centavos. Com o monitoramento ligado, rode de novo
+o `observabilidade.sh` depois de derrubar a Lambda: sem o gateway, ele remove o
+monitor de disponibilidade, que senão alertaria por e-mail a cada 5 minutos.
+
 ### Como o deploy funciona
 
 `infra/scripts/deploy.sh` — o mesmo script no pipeline e na mão:
@@ -566,8 +645,9 @@ que as migrações criam as tabelas:
 
 1. `AMBIENTE=homologacao SOMENTE_MIGRACAO=sim bash infra/scripts/deploy.sh`: publica a imagem e roda
    só as migrações.
-2. O administrador roda os scripts `criar-usuario-*.sql` e o
-   `verificar-permissoes.sql` do repositório do banco.
+2. `./infra/scripts/preparar-banco.sh`: roda no cluster os scripts
+   `criar-usuario-*.sql` e `verificar-permissoes.sql` do repositório do banco
+   (ver [Subir do zero](#subir-do-zero)).
 3. `AMBIENTE=homologacao PULAR_MIGRACAO=sim bash infra/scripts/deploy.sh`: sobe a aplicação.
 
 Nos deploys seguintes basta o comando do bloco acima. Se uma migração nova

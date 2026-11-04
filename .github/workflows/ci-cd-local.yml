@@ -1,6 +1,12 @@
-name: CI/CD - Autopecas API - Local Kubernetes
+name: CI - Autopecas API (deploy local manual)
 
 on:
+  workflow_dispatch:
+    inputs:
+      deploy_local:
+        description: 'Executar deploy no Kubernetes local (exige runner self-hosted)'
+        type: boolean
+        default: false
   push:
     branches:
       - refactor/arquitetura-hexagonal
@@ -108,9 +114,8 @@ jobs:
       - linux
       - x64
       - autopecas
-    # Deploy somente em push.
-    # Pull Request executa CI, mas não altera o cluster.
-    if: github.event_name == 'push'
+    # O deploy na AWS usa cd-aws.yml; o Kind local exige acionamento explícito.
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_local == true
     steps:
       # ==========================================================
       # CHECKOUT

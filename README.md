@@ -531,7 +531,9 @@ repositórios lado a lado e rode cada passo na raiz do repositório indicado.
 
 Pré-requisitos: Docker e Git Bash (no Windows) ou bash; credencial da AWS (no
 Lab, cole a da sessão em `~/.aws/credentials`). Os repositórios do banco e da
-Lambda usam Terraform e OpenSSL locais, como descrito nos READMEs deles.
+Lambda rodam com ferramentas locais, descritas nos READMEs deles: Terraform nos
+dois; na Lambda também Java 21 e Maven (build), OpenSSL (chave do JWT) e
+Python 3 (o apply espera o JWKS do gateway responder com um script Python).
 
 Senhas, escolhidas por você e reutilizadas entre os passos:
 
@@ -678,7 +680,12 @@ Para ligar o CD (Settings → Secrets and variables → Actions):
   `APP_DB_PASSWORD`, `DB_ADMIN_USERNAME`, `DB_ADMIN_PASSWORD` e, opcional,
   `SMOKE_DOCUMENTO`.
 
-Sem `AWS_CD_HABILITADO`, o workflow é ignorado em vez de falhar.
+Sem `AWS_CD_HABILITADO`, o workflow é ignorado em vez de falhar. Com ele
+ligado, o job confere antes a credencial e se o ambiente da branch existe
+(cluster, banco e Lambda): fora de uma sessão do Lab, ou com o ambiente
+derrubado, o deploy é pulado com um aviso no resumo da execução, em vez de
+falhar. Para fazer o deploy depois de subir o ambiente, atualize os secrets da
+sessão e use **Actions → CD - Deploy AWS → Run workflow** na branch.
 
 ## 📊 Monitoramento (New Relic)
 

@@ -95,21 +95,49 @@ jobs:
       - name: Permissão no Maven Wrapper
         run: chmod +x mvnw
 
-      - name: Conferir a sessão do Learner Lab
-        # Falhar aqui, com uma mensagem clara, é melhor que falhar no meio do
-        # deploy com um "ExpiredToken".
+      - name: Conferir a sessão do Learner Lab e o ambiente
+        id: ambiente
+        # No Learner Lab o ambiente só existe durante uma sessão (~4h), e é
+        # recriado a cada uma. Fora dela — credencial expirada, ou a infra do
+        # ambiente derrubada — não há onde fazer o deploy: o job termina com um
+        # aviso, e não em vermelho, para um merge na main não parecer quebrado
+        # só porque o Lab está desligado.
+        #
+        # "Existe" é ter as saídas no state, não o arquivo: um `destroy` deixa o
+        # arquivo de state no bucket, vazio.
         run: |
-          if ! aws sts get-caller-identity --query Arn --output text; then
-            echo "::error::Credencial inválida ou expirada. Inicie uma sessão no Learner Lab e atualize AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN."
-            exit 1
+          pular() {
+            echo "::warning::Deploy em ${AMBIENTE} pulado: $1"
+            echo "### Deploy em \`${AMBIENTE}\` pulado" >> "$GITHUB_STEP_SUMMARY"
+            echo "$1" >> "$GITHUB_STEP_SUMMARY"
+            echo "pronto=nao" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SESSION_TOKEN" ]; then
+            pular "secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY e AWS_SESSION_TOKEN não configurados."
           fi
+          if ! CONTA="$(aws sts get-caller-identity --query Account --output text)"; then
+            pular "credencial da AWS inválida ou expirada. Inicie uma sessão no Learner Lab, atualize os três secrets AWS_* e rode de novo (Actions → Run workflow)."
+          fi
+          saida() { aws s3 cp "s3://autopecas-tfstate-${CONTA}/$1" - 2>/dev/null | jq -r ".outputs.$2.value // empty" 2>/dev/null || true; }
+          for par in "k8s/cluster/terraform.tfstate:cluster_name:cluster (autopecas-infra-k8s)" \
+                     "db/${AMBIENTE}/terraform.tfstate:db_url:banco (autopecas-infra-db)" \
+                     "lambda/${AMBIENTE}/terraform.tfstate:jwt_issuer:Lambda (autopecas-lambda-auth)"; do
+            IFS=: read -r chave nome origem <<< "$par"
+            if [ -z "$(saida "$chave" "$nome")" ]; then
+              pular "o ${origem} de ${AMBIENTE} não está provisionado nesta conta. Suba o ambiente (README, seção Subir do zero) e rode de novo."
+            fi
+          done
+          echo "pronto=sim" >> "$GITHUB_OUTPUT"
 
       - name: Deploy
+        if: steps.ambiente.outputs.pronto == 'sim'
         # O runner já traz Docker, AWS CLI, kubectl e jq: os scripts usam os
         # binários locais e não constroem a imagem toolbox.
         run: bash infra/scripts/deploy.sh
 
       - name: Smoke test
+        if: steps.ambiente.outputs.pronto == 'sim'
         env:
           SMOKE_DOCUMENTO: ${{ secrets.SMOKE_DOCUMENTO }}
         run: bash infra/scripts/smoke.sh

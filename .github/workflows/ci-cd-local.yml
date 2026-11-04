@@ -42,7 +42,21 @@ jobs:
       - name: Verificar versão Java
         run: java -version
       - name: Verificar Maven
-        run: ./mvnw --version
+        timeout-minutes: 5
+        env:
+          MVNW_VERBOSE: 'true'
+        run: |
+          for tentativa in 1 2 3; do
+            if ./mvnw --version; then
+              exit 0
+            fi
+            if [ "$tentativa" -eq 3 ]; then
+              echo "::error::Falha ao baixar/iniciar o Maven após 3 tentativas. Confira o erro de rede acima."
+              exit 1
+            fi
+            echo "::warning::Falha ao iniciar o Maven (tentativa ${tentativa}/3). Tentando novamente em 10 segundos."
+            sleep 10
+          done
       - name: Validar projeto
         run: ./mvnw validate
       - name: Executar testes
